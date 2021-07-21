@@ -1,22 +1,23 @@
 from time import perf_counter
+from tabulate import tabulate
+
+_timings = []
 
 
-class TTimer(object):
-    def __init__(self, what="", printer=None):
+def list_timings(printer=None):
+    printer = print if printer is None else printer
+    out = tabulate(_timings, headers=["what", "time [ms]"])
+    printer(out)
+
+
+class TTimer:
+    def __init__(self, what=""):
         self.what = what
-        self.printer = print if printer is None else printer
 
     def __enter__(self):
         self.start = perf_counter()
         return self
 
     def __exit__(self, *args):
-        self.s = perf_counter() - self.start
-        self.ms = self.s * 1000  # millisecs
-        self.printer(f"{self.what}: {self.ms:6.3f} ms")
-
-
-if __name__ == "__main__":
-    with TTimer("long loop"):
-        for i in range(1000000):
-            pass
+        ms = (perf_counter() - self.start) * 1000
+        _timings.append((self.what, ms))
