@@ -1,7 +1,9 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import zaya
-from scipy.spatial import distance
+import pytest
+from scipy.spatial import distance, KDTree
+import bisect
 
 
 class AdaptivePlot:
@@ -12,11 +14,12 @@ class AdaptivePlot:
         self.ax.set_ylim((0, 1))
         self.ax.set_aspect("equal")
         self.cs = [plt.Circle((0, 0), 0, lw=1, fill=False) for _ in range(N)]
+        self.Fs = [plt.Arrow((0, 0), 0, lw=1, fill=False) for _ in range(N)]
 
         for c in self.cs:
             self.ax.add_patch(c)
 
-    def __call__(self, x, r, text=""):
+    def __call__(self, x, r, F, text=""):
         for c, x in zip(self.cs, x):
             c.set_center(x)
             c.set_radius(r)
@@ -38,64 +41,225 @@ class AdaptivePlot:
         plt.show()
 
 
-def d_in(xs):
-    distance_to_wall_0 = np.min(x)
-    distance_to_wall_1 = np.min(1 - x)
+def show_circles_and_force(xs, d_in, d_out, Fs_wall=None, Fs_sphere=None):
+    if Fs_wall is None:
+        Fs_wall = np.zeros_like(xs)
+    if Fs_sphere is None:
+        Fs_sphere = np.zeros_like(xs)
+    assert len(xs) == len(Fs_wall) == len(Fs_sphere)
+    assert d_in <= d_out
+    ax = plt.gca()
+    ax.set_xlim((0, 1))
+    ax.set_ylim((0, 1))
+    ax.set_aspect("equal")
 
-    return min(np.min(distance.pdist(x)), distance_to_wall_0, distance_to_wall_1)
+    for x, Fwall, Fsphere in zip(xs, Fs_wall, Fs_sphere):
+        ax.add_patch(plt.Circle(x, d_in / 2, fill=True, color="gray"))
+        ax.add_patch(plt.Circle(x, d_out / 2, fill=False, lw=2, color="gray"))
+        ax.arrow(
+            *x, *(Fwall + Fsphere), width=0.01, color="red", length_includes_head=True
+        )
+        ax.arrow(*x, *Fwall, width=0.005, color="green", length_includes_head=True)
+        ax.arrow(*x, *Fsphere, width=0.005, color="blue", length_includes_head=True)
+
+    plt.show()
 
 
-N = 20
-L = 1  # box length
-np.random.seed(6174)
-x = np.random.random((N, 2))
+def distance_to_unit_cube(xs):
+    x0 = xs[:, 0]
+    x1 = 1 - xs[:, 0]
+    y0 = xs[:, 1]
+    y1 = 1 - xs[:, 1]
+    return x0, x1, y0, y1
+
+
+def d_in(xs, tree):
+    with zaya.TTimer("wall distance"):
+        d = distance_to_unit_cube(xs)
+        d_wall = min(np.min(x) for x in d) * 2
+
+    with zaya.TTimer("sphere distance"):
+        d, i = tree.query(x, k=2)
+        d_spheres = np.min(d[:, 1])
+
+    return min(d_wall, d_spheres)
+
+
+def test():
+    x = np.array([[0.1, 0.2], [0.3, 0.4]])
+    x0, x1, y0, y1 = distance_to_unit_cube(x)
+
+    assert x0[0] == pytest.approx(0.1)
+    assert x0[1] == pytest.approx(0.3)
+    assert x1[0] == pytest.approx(0.9)
+    assert x1[1] == pytest.approx(0.7)
+
+    assert y0[0] == pytest.approx(0.2)
+    assert y0[1] == pytest.approx(0.4)
+    assert y1[0] == pytest.approx(0.8)
+    assert y1[1] == pytest.approx(0.6)
+
+import numba
+
+def RSA(N, R, n_tries=1000):
+    """
+    Places N spheres of radius R in a unit square. Stops, if n_tries are
+    exceeded.
+    """
+    spheres = np.zeros((N, 2))
+    for i in range(N):
+        n = 0
+        while True:
+            x = np.random.uniform(R, 1 - R, size=2)
+            d = np.sum((spheres - x) ** 2, axis=1)
+            if np.all(d > (2 * R) ** 2):
+                # print("place sphere {i} at {x}")
+                spheres[i] = x
+                break
+
+            n += 1
+            if n > n_tries:
+                return None
+    return spheres
+
+
+def estimate_d(eta):
+    return 2 * L * (eta / (np.pi * N)) ** 0.5
+
+
+test()
+
+
+# x = np.array([[0.3, 0.5], [0.8, 0.2]])
 # r = 0.1
 
-eta = 0.9  # nominal packing density
-d_out_old = 2 * L * (3 * eta / (4 * np.pi * N)) ** (1 / 3)
 
-tau = 1.0
 
-kappa = 0.2
+    # print(all_neighbors)
+    # for i, p in enumerate(x):
+        # q = tree.query_ball_point(p, r=2*d_out)
+        # print(i in q)
 
-for iteration in range(10):
-    d = d_in(x)
-    V_real = N * np.pi / (6 * L ** 3) * d ** 3
-    V_virt = N * np.pi / (6 * L ** 3) * d_out_old ** 3
+def sphere_force2(x, sigma, kappa, all_neighbors):
+    F_sphere = np.zeros_like(x)
 
-    dV = V_virt - V_real
+    return F_sphere
 
-    print(iteration, V_real, V_virt, dV)
+@numba.njit(fastmath=True)
+def sphere_force(x, sigma, kappa, values, idx):
+    F_sphere = np.zeros_like(x)
 
-    nu = np.ceil(-np.log10(dV))
-    d_out_new = d_out_old * (1 - 0.5 ** nu / (N * tau))
+    for i_sphere in range(N):
+        indices = values[idx[i_sphere]:idx[i_sphere+1]]
 
-    x_new = np.copy(x)
-    for i in range(N):
-        xi = x[i]
+        diffs = x[i_sphere] - x[indices]
 
-        def add(diff, sigma):
-            delta = np.linalg.norm(diff)
-            P = (sigma - delta) / sigma if delta < sigma else 0
-            return kappa / d * P * np.asarray(diff) / delta
+        deltas = (diffs[:,0]**2 + diffs[:,1]**2)**0.5
+        # deltas = np.linalg.norm(diffs, axis=1)
 
-        # wall terms
-        # x_new[i] += add((xi[0], 0), sigma=d / 2)
-        # x_new[i] += add((0, xi[1]), sigma=d / 2)
-        # x_new[i] += add((1 - xi[0], 0), sigma=d / 2)
-        # x_new[i] += add((0, 1 - xi[1]), sigma=d / 2)
+        Ps = np.maximum((sigma- deltas) / sigma, 0)
+        # assert np.all(Ps < 1)
+        factor = kappa / sigma* Ps / deltas
+        factor = factor.reshape(-1, 1)
 
-        for j in range(N):
-            if i == j:
-                continue
+        F = np.sum(diffs * factor, axis=0)
+        F_sphere[i_sphere] = F
+    return F_sphere
 
-            x_new[i] += add(xi - x[j], sigma=d)
 
-    # print(x_new - x)
-    x = np.copy(x_new)
+@profile
+def fba(x):
+    d_out0 = estimate_d(1.0)
+    d_out = d_out0
 
-    d_out_old = d_out_new
+    # show_circles_and_force(x, r0, d_out)
 
+    tau = 1000
+
+    kappa = 0.1 / N
+
+
+    for iteration in range(700):
+        with zaya.TTimer("KDTree| build"):
+            tree = KDTree(x)
+
+
+
+        d = d_in(x, tree)
+        if d < 0:
+            show_circles_and_force(x, d, d_out, F_wall, F_sphere)
+            raise RuntimeError(f"{d = } !?")
+        # V_real = N * np.pi / (6 * L ** 3) * d ** 3
+        # V_virt = N * np.pi / (6 * L ** 3) * d_out_old ** 3
+        V_real = N * np.pi / 4 * d ** 2 / L ** 2
+        V_virt = N * np.pi / 4 * d_out ** 2 / L ** 2
+
+        dV = V_virt - V_real
+
+        print(iteration, V_real, V_virt, dV, flush=True)
+
+        nu = np.ceil(-np.log10(dV))
+        d_out -= 0.5 ** nu * d_out0 / (2 * tau)
+
+        with zaya.TTimer("Force wall"):
+            F_wall = np.zeros_like(x)  # something like an "overlap force"
+            distance_wall = distance_to_unit_cube(x)
+
+            sigma_wall = d_out / 2.0
+
+            Pwall = [
+                np.maximum((sigma_wall - distance) / sigma_wall, 0)
+                for distance in distance_wall
+            ]
+            # print(Pwall[0])
+            # print(Pwall[1])
+
+            for pp in Pwall:
+                assert np.all(pp < 1)
+
+            F_wall[:, 0] += kappa / sigma_wall * Pwall[0]
+            F_wall[:, 0] -= kappa / sigma_wall * Pwall[1]
+
+            F_wall[:, 1] += kappa / sigma_wall * Pwall[2]
+            F_wall[:, 1] -= kappa / sigma_wall * Pwall[3]
+
+        with zaya.TTimer("Force spheres"):
+            sigma_sphere = d_out
+            with zaya.TTimer("KDTree| querry all"):
+                all_neighbors = tree.query_ball_point(x, r=sigma_sphere)
+
+            with zaya.TTimer("KDTree| remove"):
+                values = []
+                idx = [0]
+                for i, neighbors in enumerate(all_neighbors):
+                    del neighbors[bisect.bisect_left(neighbors, i)]
+                    values += neighbors
+                    idx.append(idx[i] + len(neighbors))
+                values = np.array(values)
+                idx = np.array(idx)
+
+
+            F_sphere = sphere_force(x, sigma_sphere, kappa, values, idx)
+            # F_sphere = sphere_force2(x, sigma_sphere, kappa, all_neighbors)
+                    
+        with zaya.TTimer("Update positions"):
+            x += F_wall
+            x += F_sphere
+
+        # kappa = min(kappa*1.01, 0.1)
+
+# show_circles_and_force(x, d, d_out)
+
+np.random.seed(6174)
+N = 1000
+L = 1  # box length
+# np.random.seed(6174)
+with zaya.TTimer("RSA"):
+    r0 = estimate_d(0.1) / 2
+    x = RSA(N, r0)
+    assert x is not None
+
+fba(x)
 
 zaya.list_timings()
 
