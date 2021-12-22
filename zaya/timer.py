@@ -1,12 +1,13 @@
 from time import perf_counter
 from tabulate import tabulate
+from collections import defaultdict
 
-_timings = []
+_timings = defaultdict(float)
 
 
 def list_timings(printer=None):
     printer = print if printer is None else printer
-    out = tabulate(_timings, headers=["what", "time [ms]"])
+    out = tabulate(_timings.items(), headers=["what", "time [ms]"])
     printer(out)
 
 
@@ -20,4 +21,4 @@ class TTimer:
 
     def __exit__(self, *args):
         ms = (perf_counter() - self.start) * 1000
-        _timings.append((self.what, ms))
+        _timings[self.what] += ms

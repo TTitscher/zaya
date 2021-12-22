@@ -11,6 +11,9 @@ class TestTimer(unittest.TestCase):
     def test_message(self):
         with zaya.TTimer("my task"):
             time.sleep(0.1)
+        
+        with zaya.TTimer("my task"):
+            time.sleep(0.1)
 
         with zaya.TTimer("my other task"):
             pass
