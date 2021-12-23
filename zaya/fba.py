@@ -5,64 +5,7 @@ import pytest
 from scipy.spatial import distance, KDTree
 import bisect
 
-
-class AdaptivePlot:
-    def __init__(self, N):
-        plt.ion()  # interactive on
-        self.ax = plt.gca()
-        self.ax.set_xlim((0, 1))
-        self.ax.set_ylim((0, 1))
-        self.ax.set_aspect("equal")
-        self.cs = [plt.Circle((0, 0), 0, lw=1, fill=False) for _ in range(N)]
-        self.Fs = [plt.Arrow((0, 0), 0, lw=1, fill=False) for _ in range(N)]
-
-        for c in self.cs:
-            self.ax.add_patch(c)
-
-    def __call__(self, x, r, F, text=""):
-        for c, x in zip(self.cs, x):
-            c.set_center(x)
-            c.set_radius(r)
-        self.ax.set_title(text)
-        # self.ax.relim()
-        self.ax.autoscale_view(True, True, True)
-
-        self.ax.figure.canvas.flush_events()
-
-    def close(self):
-        plt.ioff()  # interactive off
-        plt.close()
-
-    def keep(self):
-        """
-        Deactivates the interactive mode to show the plot.
-        """
-        plt.ioff()  # interactive off
-        plt.show()
-
-
-def show_circles_and_force(xs, d_in, d_out, Fs_wall=None, Fs_sphere=None):
-    if Fs_wall is None:
-        Fs_wall = np.zeros_like(xs)
-    if Fs_sphere is None:
-        Fs_sphere = np.zeros_like(xs)
-    assert len(xs) == len(Fs_wall) == len(Fs_sphere)
-    assert d_in <= d_out
-    ax = plt.gca()
-    ax.set_xlim((0, 1))
-    ax.set_ylim((0, 1))
-    ax.set_aspect("equal")
-
-    for x, Fwall, Fsphere in zip(xs, Fs_wall, Fs_sphere):
-        ax.add_patch(plt.Circle(x, d_in / 2, fill=True, color="gray"))
-        ax.add_patch(plt.Circle(x, d_out / 2, fill=False, lw=2, color="gray"))
-        ax.arrow(
-            *x, *(Fwall + Fsphere), width=0.01, color="red", length_includes_head=True
-        )
-        ax.arrow(*x, *Fwall, width=0.005, color="green", length_includes_head=True)
-        ax.arrow(*x, *Fsphere, width=0.005, color="blue", length_includes_head=True)
-
-    plt.show()
+from sphere_visu import SphereVisualizer
 
 
 def distance_to_unit_cube(xs):
@@ -70,36 +13,13 @@ def distance_to_unit_cube(xs):
     x1 = 1 - xs[:, 0]
     y0 = xs[:, 1]
     y1 = 1 - xs[:, 1]
-    return x0, x1, y0, y1
+    z0 = xs[:, 2]
+    z1 = 1 - xs[:, 2]
+    return x0, x1, y0, y1, z0, z1
 
-
-def d_in(xs, tree):
-    with zaya.TTimer("wall distance"):
-        d = distance_to_unit_cube(xs)
-        d_wall = min(np.min(x) for x in d) * 2
-
-    with zaya.TTimer("sphere distance"):
-        d, i = tree.query(x, k=2)
-        d_spheres = np.min(d[:, 1])
-
-    return min(d_wall, d_spheres)
-
-
-def test():
-    x = np.array([[0.1, 0.2], [0.3, 0.4]])
-    x0, x1, y0, y1 = distance_to_unit_cube(x)
-
-    assert x0[0] == pytest.approx(0.1)
-    assert x0[1] == pytest.approx(0.3)
-    assert x1[0] == pytest.approx(0.9)
-    assert x1[1] == pytest.approx(0.7)
-
-    assert y0[0] == pytest.approx(0.2)
-    assert y0[1] == pytest.approx(0.4)
-    assert y1[0] == pytest.approx(0.8)
-    assert y1[1] == pytest.approx(0.6)
 
 import numba
+
 
 def RSA(N, R, n_tries=1000):
     """
@@ -110,11 +30,11 @@ def RSA(N, R, n_tries=1000):
     for i in range(N):
         n = 0
         while True:
-            x = np.random.uniform(R, 1 - R, size=2)
-            d = np.sum((spheres - x) ** 2, axis=1)
+            r = np.random.uniform(R, 1 - R, size=2)
+            d = np.sum((spheres - r) ** 2, axis=1)
             if np.all(d > (2 * R) ** 2):
-                # print("place sphere {i} at {x}")
-                spheres[i] = x
+                # print("place sphere {i} at {r}")
+                spheres[i] = r
                 break
 
             n += 1
@@ -123,146 +43,174 @@ def RSA(N, R, n_tries=1000):
     return spheres
 
 
-def estimate_d(eta):
+def estimate_d_factor_out(eta):
     return 2 * L * (eta / (np.pi * N)) ** 0.5
 
 
-test()
-
-
-# x = np.array([[0.3, 0.5], [0.8, 0.2]])
-# r = 0.1
-
-
-
-    # print(all_neighbors)
-    # for i, p in enumerate(x):
-        # q = tree.query_ball_point(p, r=2*d_out)
-        # print(i in q)
-
-def sphere_force2(x, sigma, kappa, all_neighbors):
-    F_sphere = np.zeros_like(x)
-
-    return F_sphere
-
-@numba.njit(fastmath=True)
-def sphere_force(x, sigma, kappa, values, idx):
-    F_sphere = np.zeros_like(x)
-
-    for i_sphere in range(N):
-        indices = values[idx[i_sphere]:idx[i_sphere+1]]
-
-        diffs = x[i_sphere] - x[indices]
-
-        deltas = (diffs[:,0]**2 + diffs[:,1]**2)**0.5
-        # deltas = np.linalg.norm(diffs, axis=1)
-
-        Ps = np.maximum((sigma- deltas) / sigma, 0)
-        # assert np.all(Ps < 1)
-        factor = kappa / sigma* Ps / deltas
-        factor = factor.reshape(-1, 1)
-
-        F = np.sum(diffs * factor, axis=0)
-        F_sphere[i_sphere] = F
-    return F_sphere
-
-
-@profile
-def fba(x):
-    d_out0 = estimate_d(1.0)
-    d_out = d_out0
-
-    # show_circles_and_force(x, r0, d_out)
-
-    tau = 1000
-
-    kappa = 0.1 / N
-
-
-    for iteration in range(700):
-        with zaya.TTimer("KDTree| build"):
-            tree = KDTree(x)
-
-
-
-        d = d_in(x, tree)
-        if d < 0:
-            show_circles_and_force(x, d, d_out, F_wall, F_sphere)
-            raise RuntimeError(f"{d = } !?")
-        # V_real = N * np.pi / (6 * L ** 3) * d ** 3
-        # V_virt = N * np.pi / (6 * L ** 3) * d_out_old ** 3
-        V_real = N * np.pi / 4 * d ** 2 / L ** 2
-        V_virt = N * np.pi / 4 * d_out ** 2 / L ** 2
-
-        dV = V_virt - V_real
-
-        print(iteration, V_real, V_virt, dV, flush=True)
-
-        nu = np.ceil(-np.log10(dV))
-        d_out -= 0.5 ** nu * d_out0 / (2 * tau)
-
-        with zaya.TTimer("Force wall"):
-            F_wall = np.zeros_like(x)  # something like an "overlap force"
-            distance_wall = distance_to_unit_cube(x)
-
-            sigma_wall = d_out / 2.0
-
-            Pwall = [
-                np.maximum((sigma_wall - distance) / sigma_wall, 0)
-                for distance in distance_wall
-            ]
-            # print(Pwall[0])
-            # print(Pwall[1])
-
-            for pp in Pwall:
-                assert np.all(pp < 1)
-
-            F_wall[:, 0] += kappa / sigma_wall * Pwall[0]
-            F_wall[:, 0] -= kappa / sigma_wall * Pwall[1]
-
-            F_wall[:, 1] += kappa / sigma_wall * Pwall[2]
-            F_wall[:, 1] -= kappa / sigma_wall * Pwall[3]
-
-        with zaya.TTimer("Force spheres"):
-            sigma_sphere = d_out
-            with zaya.TTimer("KDTree| querry all"):
-                all_neighbors = tree.query_ball_point(x, r=sigma_sphere)
-
-            with zaya.TTimer("KDTree| remove"):
-                values = []
-                idx = [0]
-                for i, neighbors in enumerate(all_neighbors):
-                    del neighbors[bisect.bisect_left(neighbors, i)]
-                    values += neighbors
-                    idx.append(idx[i] + len(neighbors))
-                values = np.array(values)
-                idx = np.array(idx)
-
-
-            F_sphere = sphere_force(x, sigma_sphere, kappa, values, idx)
-            # F_sphere = sphere_force2(x, sigma_sphere, kappa, all_neighbors)
-                    
-        with zaya.TTimer("Update positions"):
-            x += F_wall
-            x += F_sphere
-
-        # kappa = min(kappa*1.01, 0.1)
-
-# show_circles_and_force(x, d, d_out)
 
 np.random.seed(6174)
-N = 1000
-L = 1  # box length
+# N = 100
+# L = 1  # box length
 # np.random.seed(6174)
-with zaya.TTimer("RSA"):
-    r0 = estimate_d(0.1) / 2
-    x = RSA(N, r0)
-    assert x is not None
+# with zaya.TTimer("RSA"):
+#     r0 = estimate_d(0.1) / 2
+#     r = RSA(N, r0)
+#     assert r is not None
 
-fba(x)
+N = 2
+r = np.array([[0.3, 0.5, 0.5], [0.8, 0.5, 0.5]])
+d = np.array([0.3, 0.3])
 
+
+r = np.random.uniform(0.2, 0.8, (3**3,3))
+d = np.ones(len(r))
+# d = np.random.uniform(0.2, 0.8, 8)
+
+N = len(r)
+
+visu = SphereVisualizer(len(r))
+visu.add_box(1, 1, 1)
+# visu.update_data(r, d)
+# visu.show()
+
+
+def factor_in(r, d):
+    """
+    Calculate the factor_in in 
+        d_i_in = factor_in * d_i 
+    such that the spheres (centers `r` and diameters `d`) do not overlap with 
+    themselves or the walls.
+    """
+    with zaya.TTimer("wall distance"):
+        distances = distance_to_unit_cube(r)
+        d_wall = min(np.min(dd / (d / 2)) for dd in distances)
+
+    with zaya.TTimer("sphere distance"):
+        d_spheres = d_wall
+        for i in range(len(d)):
+            for j in range(len(d)):
+                if i == j:
+                    continue
+                current_distance = np.linalg.norm(r[i] - r[j])
+                radii= (d[i] + d[j])/2
+                factor = current_distance / radii
+                d_spheres = min(d_spheres, factor)
+
+    return min(d_wall, d_spheres)
+
+def factor_out(r, d, eta=1.0):
+    """
+    Calculate the factor_out in 
+        d_i_out = factor_out * d_i 
+    such that the spheres (centers `r` and diameters `d`) have a volume 
+    fraction of `eta`, where the volume fraction is defined as
+
+        eta = V_spheres / V_box = sum(pi/6 d³) / V_box
+            = pi/6 factor_out³ * sum(d_i³)
+
+    """
+    V_box = 1.
+    return (V_box * eta * 6 / np.pi / np.sum(d**3))**(1/3)
+
+f_in = factor_in(r, d)
+assert factor_in(r, d*f_in) == pytest.approx(1)
+    
+f_out0 = factor_out(r, d, eta=0.99)
+f_out = f_out0
+assert np.sum(np.pi/6 * (d*f_out)**3) == pytest.approx(0.99)
+
+tau = 2000
+
+rho = 0.1
+
+
+for iteration in range(10000):
+    f_in = factor_in(r, d) 
+
+    if f_in < 0:
+        raise RuntimeError(f"{f_in = } !?")
+    
+    visu.update_data(r, d * f_in)
+    # if iteration % 100 == 0:
+    # visu.show()
+
+    V_real = np.pi / 6 * np.sum((d*f_in) ** 3)
+    V_virt = np.pi / 6 * np.sum((d*f_out)**3)
+
+    nu = np.ceil(-np.log10(V_virt - V_real))
+
+    print(iteration, V_real, V_virt, nu)
+
+    f_out -= 0.5 ** nu * f_out0 / (2 * tau)
+
+    if f_in > f_out:
+        break
+
+    with zaya.TTimer("Force spheres"):
+        dr_sphere = np.zeros_like(r)  # delta r resulting from an "overlap force"
+
+        for i in range(N):
+            for j in range(N):
+                if i == j:
+                    continue
+                d_out_i, d_out_j = f_out * d[i], f_out * d[j]
+
+                rji = r[j] - r[i]
+                abs_rji = np.linalg.norm(rji)
+
+                overlap = (d_out_i + d_out_j)/2 - abs_rji
+                if overlap < 0:
+                    # accounts for 1_ij in eq.(2)
+                    continue
+
+                def V_sphere_intersection(R, r, d):
+                    return np.pi * (R+r-d)**2 * (d**2 + 2*d*r -3 *r**2 + 2*d*R + 6*r*R-3*R**2) / (12 * d)
+
+                p_ij = d_out_i * d_out_j * (abs_rji**2 / (0.25 * (d_out_i + d_out_j)**2) - 1)
+                # sigma = 0.5 * (d_out_i + d_out_j)
+                # p_ij = -(sigma - abs_rji) / sigma
+                # p_ij = -V_sphere_intersection(d_out_i, d_out_j, abs_rji)
+                # p_ij = abs_rji**2 - d_out_i * d_out_j
+#
+                F_ij = rho * p_ij * rji / abs_rji
+                dr_sphere[i] += F_ij / d[i]
+
+    with zaya.TTimer("Force wall"):
+        dr_wall = np.zeros_like(r)  
+        distance_wall = distance_to_unit_cube(r)
+
+        current_radius = d * f_out / 2
+        allowed_distance_wall = current_radius
+        
+        overlaps = [np.maximum(allowed_distance_wall- distance, 0) for distance in distance_wall]
+
+        # overlap_V = [1/3 * np.pi * overlap**2 * (3 * current_radius - overlap) for overlap in overlaps]
+
+        scaled_overlaps = [V/current_radius*2 / d for V in overlaps]
+       
+        dr_wall[:, 0] += rho * scaled_overlaps[0] 
+        dr_wall[:, 0] -= rho * scaled_overlaps[1]
+
+        dr_wall[:, 1] += rho * scaled_overlaps[2]
+        dr_wall[:, 1] -= rho * scaled_overlaps[3]
+
+        dr_wall[:, 2] += rho * scaled_overlaps[4]
+        dr_wall[:, 2] -= rho * scaled_overlaps[5]
+
+    # print(dr_wall)
+    # print(dr_sphere)
+
+
+    with zaya.TTimer("Update positions"):
+        r += dr_wall
+        r += dr_sphere
+
+    # kappa = min(kappa * 1.01, 0.1)
+    
+visu.update_data(r, d * f_in)
+visu.show()
 zaya.list_timings()
 
 # p = AdaptivePlot(N)
-# p(x, r)
+# p(r, r)
 # p.keep()
