@@ -157,7 +157,7 @@ def sphere_force(x, sigma, kappa, values, idx):
         deltas = (diffs[:,0]**2 + diffs[:,1]**2)**0.5
         # deltas = np.linalg.norm(diffs, axis=1)
 
-        Ps = np.maximum((sigma- deltas) / sigma, 0)
+        Ps = np.maximum((sigma**2- deltas**2) / sigma**2, 0)
         # assert np.all(Ps < 1)
         factor = kappa / sigma* Ps / deltas
         factor = factor.reshape(-1, 1)
@@ -179,11 +179,12 @@ def fba(x):
     kappa = 0.05 / N
 
 
-    for iteration in range(1000):
+    for iteration in range(100000):
         with zaya.TTimer("KDTree| build"):
-            tree = KDTree(x)
+            if iteration < 10 or iteration % 100 == 0:
+                tree = KDTree(x)
 
-
+    
 
         d = d_in(x, tree)
         if d < 0:
@@ -195,11 +196,14 @@ def fba(x):
         V_virt = N * np.pi / 4 * d_out ** 2 / L ** 2
 
         dV = V_virt - V_real
+        if dV < 0:
+            break
 
         print(iteration, V_real, V_virt, dV, flush=True)
 
         nu = np.ceil(-np.log10(dV))
         d_out -= 0.5 ** nu * d_out0 / (2 * tau)
+
 
         with zaya.TTimer("Force wall"):
             F_wall = np.zeros_like(x)  # something like an "overlap force"
@@ -208,7 +212,7 @@ def fba(x):
             sigma_wall = d_out / 2.0
 
             Pwall = [
-                np.maximum((sigma_wall - distance) / sigma_wall, 0)
+                np.maximum((sigma_wall**2 - distance**2) / sigma_wall**2, 0)
                 for distance in distance_wall
             ]
             # print(Pwall[0])
@@ -223,12 +227,12 @@ def fba(x):
             F_wall[:, 1] += kappa / sigma_wall * Pwall[2]
             F_wall[:, 1] -= kappa / sigma_wall * Pwall[3]
 
-        if iteration < 10 or iteration % 10 == 0:
+        if iteration < 10 or iteration % 100 == 0:
 
             with zaya.TTimer("Force spheres"):
                 sigma_sphere = d_out
                 with zaya.TTimer("KDTree| querry all"):
-                    all_neighbors = tree.query_ball_point(x, r=2*sigma_sphere)
+                    all_neighbors = tree.query_ball_point(x, r=3*sigma_sphere)
 
                 with zaya.TTimer("KDTree| remove"):
                     idx = [0]
@@ -249,8 +253,8 @@ def fba(x):
     
     return x, d, d_out
 
-np.random.seed(6174)
-N = 3**2
+np.random.seed(6175)
+N = 500
 L = 1  # box length
 # np.random.seed(6174)
 with zaya.TTimer("RSA"):

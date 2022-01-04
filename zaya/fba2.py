@@ -65,6 +65,7 @@ with zaya.TTimer("RSA"):
 # r = np.random.uniform(0.2, 0.8, (3**3,3))
 d = np.ones(len(r))
 # d = np.random.uniform(0.2, 0.8, len(r))
+# d = np.random.choice([1, 0.6], len(r))
 
 N = len(r)
 
@@ -119,10 +120,13 @@ f_out0 = factor_out(r, d, eta=0.99)
 f_out = f_out0
 assert np.sum(np.pi/6 * (d*f_out)**3) == pytest.approx(0.99)
 
-tau = 1000
+tau = 1e3
 
+# rho = 0.1/N
+rho = 0.05
 rho = 0.1
 
+current_iteration = 0
 
 for iteration in range(10000):
     f_in = factor_in(r, d) 
@@ -141,7 +145,8 @@ for iteration in range(10000):
 
     print(iteration, V_real, V_virt, nu)
 
-    f_out -= 0.5 ** nu * f_out0 / (2 * tau)
+    # f_out -= 0.5 ** nu * f_out0 / (2 * tau)
+    f_out -= 0.5 ** nu * f_out / (2 * tau)
 
     if f_in > f_out:
         break
@@ -155,21 +160,32 @@ for iteration in range(10000):
                     continue
                 d_out_i, d_out_j = f_out * d[i], f_out * d[j]
 
+
                 rji = r[j] - r[i]
                 abs_rji = np.linalg.norm(rji)
 
-                overlap = (d_out_i + d_out_j)/2 - abs_rji
+                sigma = (d_out_i + d_out_j) / 2
+                overlap = sigma - abs_rji
                 if overlap < 0:
                     # accounts for 1_ij in eq.(2)
                     continue
-
+                
                 def V_sphere_intersection(R, r, d):
                     return np.pi * (R+r-d)**2 * (d**2 + 2*d*r -3 *r**2 + 2*d*R + 6*r*R-3*R**2) / (12 * d)
 
-                p_ij = d_out_i * d_out_j * (abs_rji**2 / (0.25 * (d_out_i + d_out_j)**2) - 1)
+                # p_ij = V_sphere_intersection(d_out_i, d_out_j, abs_rji)
+                p_ij = (sigma - abs_rji)/ sigma
+                # p_ij = (sigma**2 - abs_rji**2)
+
+
+                # p_ij = d_out_i * d_out_j * (1 - abs_rji**2 / sigma**2 ) / sigma**2
+
+                dr_sphere[i] -= rho / d[i] * p_ij * rji / abs_rji 
+                continue
+
+
                 # sigma = 0.5 * (d_out_i + d_out_j)
                 # p_ij = -(sigma - abs_rji) / sigma
-                # p_ij = -V_sphere_intersection(d_out_i, d_out_j, abs_rji)
                 # p_ij = abs_rji**2 - d_out_i * d_out_j
 #
                 F_ij = rho * p_ij * rji / abs_rji
@@ -180,32 +196,51 @@ for iteration in range(10000):
         distance_wall = distance_to_unit_cube(r)
 
         current_radius = d * f_out / 2
-        allowed_distance_wall = current_radius
+        Pwall = [np.maximum((current_radius - distance) / current_radius, 0) for distance in distance_wall]
+        # print("wall", Pwall)
+        # allowed_distance_wall = current_radius
         
-        overlaps = [np.maximum(allowed_distance_wall- distance, 0) for distance in distance_wall]
+        # overlaps = [np.maximum(current_radius- distance, 0) for distance in distance_wall]
 
-        # overlap_V = [1/3 * np.pi * overlap**2 * (3 * current_radius - overlap) for overlap in overlaps]
+        # Pwall = [1/3 * np.pi * overlap**2 * (3 * current_radius - overlap) for overlap in overlaps]
 
-        scaled_overlaps = [V/current_radius*2 / d for V in overlaps]
-       
-        dr_wall[:, 0] += rho * scaled_overlaps[0] 
-        dr_wall[:, 0] -= rho * scaled_overlaps[1]
+        for pp in Pwall:
+            assert np.all(pp < 1)
 
-        dr_wall[:, 1] += rho * scaled_overlaps[2]
-        dr_wall[:, 1] -= rho * scaled_overlaps[3]
+        dr_wall[:, 0] += rho / d * Pwall[0]
+        dr_wall[:, 0] -= rho / d * Pwall[1]
+        
+        dr_wall[:, 1] += rho / d * Pwall[2]
+        dr_wall[:, 1] -= rho / d * Pwall[3]
 
-        dr_wall[:, 2] += rho * scaled_overlaps[4]
-        dr_wall[:, 2] -= rho * scaled_overlaps[5]
+        dr_wall[:, 2] += rho / d * Pwall[4]
+        dr_wall[:, 2] -= rho / d * Pwall[5]
+
+        # dr_wall *= 0.5
+        #
+        # scaled_overlaps = [V/current_radius*2 / d for V in overlaps]
+ #
+        # dr_wall[:, 0] += rho * scaled_overlaps[0]
+        # dr_wall[:, 0] -= rho * scaled_overlaps[1]
+        #
+        # dr_wall[:, 1] += rho * scaled_overlaps[2]
+        # dr_wall[:, 1] -= rho * scaled_overlaps[3]
+        #
+        # dr_wall[:, 2] += rho * scaled_overlaps[4]
+        # dr_wall[:, 2] -= rho * scaled_overlaps[5]
 
     # print(dr_wall)
     # print(dr_sphere)
 
 
     with zaya.TTimer("Update positions"):
+        # print(f"{np.max(dr_wall)  = }")
+        # print(f"{np.max(dr_sphere)= }")
         r += dr_wall
         r += dr_sphere
 
-    # kappa = min(kappa * 1.01, 0.1)
+    # break
+    # rho = min(rho * 1.01, 1)
     
 visu.update_data(r, d * f_in)
 visu.show()
