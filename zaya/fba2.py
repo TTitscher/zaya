@@ -7,13 +7,14 @@ from scipy.spatial import KDTree
 import numba
 
 from sphere_visu import SphereVisualizer
+import edmd
 
-
+L = 50
 
 @numba.jit(nopython=True)
 def wrapped_euclidean(p, x):
     diff = np.abs(p-x)
-    periodic_diff = np.minimum(diff, 1-diff)
+    periodic_diff = np.minimum(diff, L-diff)
     return np.sum(periodic_diff**2, axis=1)**0.5
 
 @numba.jit(nopython=True)
@@ -45,7 +46,7 @@ def factor_out(r, d, eta=1.0):
             = pi/6 factor_out³ * sum(d_i³)
 
     """
-    V_box = 1.
+    V_box = L**3
     return (V_box * eta * 6 / np.pi / np.sum(d**3))**(1/3)
 
 @numba.jit(nopython=True)
@@ -57,9 +58,9 @@ def get_dr_sphere(r, d, f_out, rho):
         sigma = (d_out_i + d_out_j) / 2
 
         rji = r - r[i] # unperiodic
-        swap = (np.abs(rji) > 1 - np.abs(rji)) * np.sign(rji)
+        swap = (np.abs(rji) > L - np.abs(rji)) * np.sign(rji)
         # print(swap)
-        rji -= swap
+        rji -= L * swap
 
         abs_rji = np.sqrt(rji[:,0]**2 + rji[:, 1]**2+ rji[:, 2]**2)
 
@@ -67,8 +68,8 @@ def get_dr_sphere(r, d, f_out, rho):
 
         abs_rji[i] = np.inf
 
-        # p_ij = (sigma - abs_rji) / sigma
-        p_ij = d_out_i * d_out_j * (1 - abs_rji**2 / sigma**2 ) / sigma**2
+        p_ij = (sigma - abs_rji) / sigma
+        # p_ij = d_out_i * d_out_j * (1 - abs_rji**2 / sigma**2 ) / sigma**2
         p_ij = np.maximum(p_ij, 0)
         assert np.all(p_ij < 1)
     
@@ -78,25 +79,34 @@ def get_dr_sphere(r, d, f_out, rho):
 
     return dr_sphere
 
-
-
 np.random.seed(6174)
-N = 500
-d = np.ones(N)
+
+gc = edmd.GradingCurve()
+gc.add_grading_class(2, 4, 0.12)
+gc.add_grading_class(4, 8, 0.24)
+gc.add_grading_class(8, 16, 0.32)
+
+box = edmd.Cube(50, 50, 50)
+phi = box.volume() * (0.22 + 0.32 + 0.12)
+radii = gc.sample(phi, 1)
+
+N = 100
+d = 2 * np.asarray(radii)
+# d = np.ones(N)
 # r = np.random.uniform(0.2, 0.8, (3**3,3))
-# d = np.random.uniform(0.2, 1.0, len(r))
+# d = np.random.uniform(0.2, 1.0, N)**1/3
 # d = np.random.choice([1, 0.6], len(r))
 
 np.random.seed(6174)
 with zaya.TTimer("RSA"):
-    r, _ = rsa(d/2 * 0.01)
+    r, _ = rsa(d/2 * 0.01, L=L)
     assert r is not None
 
 
 N = len(r)
 
 visu = SphereVisualizer(len(r))
-visu.add_box(1, 1, 1)
+visu.add_box(L, L, L)
 # visu.update_data(r, d)
 # visu.show()
 
@@ -109,9 +119,10 @@ def fba(r, d, rho=0.01, tau=1e4):
 
     f_out0 = factor_out(r, d, eta=0.99)
     f_out = f_out0
-    assert np.sum(np.pi/6 * (d*f_out)**3) == pytest.approx(0.99)
+    f_in_old = 0
+    # assert np.sum(np.pi/6 * (d*f_out)**3) == pytest.approx(0.99)
 
-    for iteration in range(1000):
+    for iteration in range(100000):
 
         f_in = factor_in(r, d)
 
@@ -119,11 +130,12 @@ def fba(r, d, rho=0.01, tau=1e4):
             raise RuntimeError(f"{f_in = } !?")
         
         # visu.update_data(r, d * f_in)
-        # if iteration % 100 == 0:
-            # visu.show()
+        # visu
+        # visu.show()
+        # if iteration % 10 == 0:
 
-        V_real = np.pi / 6 * np.sum((d*f_in) ** 3)
-        V_virt = np.pi / 6 * np.sum((d*f_out)**3)
+        V_real = np.pi / 6 * np.sum((d*f_in) ** 3) / L**3
+        V_virt = np.pi / 6 * np.sum((d*f_out)**3) / L**3
 
         nu = np.ceil(-np.log10(V_virt - V_real))
 
@@ -143,15 +155,21 @@ def fba(r, d, rho=0.01, tau=1e4):
             # print(f"{np.max(dr_sphere)= }")
             # r += dr_wall
             r += dr_sphere
-            r = np.mod(r, 1)
+            r = np.mod(r, L)
+
+            f_in_old = f_in
             # assert np.all(r >= 0)
             # assert np.all(r <= 1)
 
         # break
         # rho = min(rho * 1.01, 1)
-    return r, f_in
+    return r, f_in_old
 
-r, f_in = fba(r, d, tau=1e3)
+r, f_in = fba(r, d, rho=0.1, tau=1e3)
+# r, f_in = fba(r, d, tau=1e4)
+# r, f_in = fba(r, d, tau=1e5)
+# r, f_in = fba(r, d, tau=1e3)
+print(f_in)
 print(f_in)
 
 visu.update_data(r, d * f_in)
