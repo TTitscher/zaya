@@ -84,7 +84,7 @@ class SphereVisualizer:
     def update_data(self, positions, ri):
 
         vtk_p = numpy_support.numpy_to_vtk(positions)
-        self.vtk_d = numpy_support.numpy_to_vtk(list(2 * ri)) # memory shenanigans
+        self.vtk_d = numpy_support.numpy_to_vtk(2 * ri) # memory shenanigans
         # print(vtk_d)
         self.positions.SetData(vtk_p)
         self.diameters.SetArray(self.vtk_d, self.N, 1)

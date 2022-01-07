@@ -49,6 +49,7 @@ def fba(x, r, rho=0.001, tau=1e3, iter_max=int(1e6), info_inverval=100):
 
     for iteration in range(iter_max):
         dr_in = cpp.dx_sphere(x, r, dr_out, rho, dx)
+        print(f"{dr_in = }")
 
         V_real, V_virt = V(r, dr_in), V(r, dr_out)
         

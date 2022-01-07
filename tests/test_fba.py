@@ -4,35 +4,45 @@ import numpy as np
 
 def main():
     np.random.seed(0)
-    N = 100
-    r = np.random.random(N) + 0.5
-    r*= 0.02
+    N = 4
+    r = np.random.choice([0.1, 0.3], N)
+    FACTOR = 1.
+    print(zaya.particles.V(r * FACTOR, 0.))
+    # r*= 0.02
+    # return
     
     visu = zaya.sphere_visu.SphereVisualizer(N)
     visu.add_box(1,1,1)
 
-    print(zaya.particles.V(r, 0.))
-
-    
 
     # return
-    x = zaya.particles.cpp.rsa(r, 1000)
+    x = zaya.particles.cpp.rsa(r*FACTOR + 0.01, 1000)
     
-    visu.update_data(x, r)
+    for i in range(N):
+        for j in range(i+1, N):
+            d = np.linalg.norm(x[i]  - x[j])
+            rs = r[i] + r[j]
+            print(d, rs, d > rs)
+
+    return
+
+    
+    
+    visu.update_data(x, r*FACTOR)
     visu.show()
 
 
     with zaya.TTimer("FBA"):
-        x, dr = zaya.particles.fba(x, r, rho=0.001, info_inverval=100)
+        x, dr = zaya.particles.fba(x, r, rho=0.001, info_inverval=1, iter_max=100)
 
-    print(zaya.particles.V(r, dr))
-
-    print(x, dr)
-    visu.update_data(x, r)
-    visu.show()
-    visu.update_data(x, r+dr)
-    visu.show()
-
+    # print(zaya.particles.V(r*FACTOR, dr))
+    #
+    # print(x, dr)
+    # visu.update_data(x, r*FACTOR)
+    # visu.show()
+    # visu.update_data(x, r*FACTOR+dr)
+    # visu.show()
+    #
 
     zaya.list_timings()
     

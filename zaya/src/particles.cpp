@@ -61,7 +61,7 @@ double DxSphere(const RowMatrixXd& x, const Eigen::VectorXd& r, double dr, doubl
             const double abs_rji = rji.norm();
 
             const double allowed_distance = ri + r[j];
-            dr_in = std::min(dr_in, abs_rji - allowed_distance);
+            dr_in = std::min(dr_in, 0.5 * (abs_rji - allowed_distance));
 
             if (abs_rji > sigma)
                 continue;
@@ -106,7 +106,7 @@ RowMatrixXd RSA(Eigen::VectorXd r, int max_tries = 1e5)
                 Eigen::Vector3d rji = PeriodicDistance(xi, x.row(j));
                 const double abs_rji = rji.norm();
 
-                if (abs_rji < ri + r[j])
+                if (abs_rji < (ri + r[j]))
                 {
                     overlap = true;
                     break;
