@@ -11,13 +11,13 @@ import edmd
 
 L = 50
 
-@numba.jit(nopython=True)
+# @numba.jit(nopython=True)
 def wrapped_euclidean(p, x):
     diff = np.abs(p-x)
     periodic_diff = np.minimum(diff, L-diff)
     return np.sum(periodic_diff**2, axis=1)**0.5
 
-@numba.jit(nopython=True)
+# @numba.jit(nopython=True)
 def factor_in(r, d):
     """
     Calculate the factor_in in 
@@ -49,7 +49,7 @@ def factor_out(r, d, eta=1.0):
     V_box = L**3
     return (V_box * eta * 6 / np.pi / np.sum(d**3))**(1/3)
 
-@numba.jit(nopython=True)
+# @numba.jit(nopython=True)
 def get_dr_sphere(r, d, f_out, rho):
     dr_sphere = np.zeros_like(r)  # delta r resulting from an "overlap force"
     for i in range(len(r)):
@@ -91,8 +91,8 @@ phi = box.volume() * (0.22 + 0.32 + 0.12)
 radii = gc.sample(phi, 1)
 
 N = 100
-d = 2 * np.asarray(radii)
-# d = np.ones(N)
+# d = 1 *
+d = np.ones(N)
 # r = np.random.uniform(0.2, 0.8, (3**3,3))
 # d = np.random.uniform(0.2, 1.0, N)**1/3
 # d = np.random.choice([1, 0.6], len(r))
@@ -114,7 +114,6 @@ visu.add_box(L, L, L)
 # assert factor_in(r, d*f_in) == pytest.approx(1)
     
 
-@profile
 def fba(r, d, rho=0.01, tau=1e4):
 
     f_out0 = factor_out(r, d, eta=0.99)
