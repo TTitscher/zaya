@@ -13,8 +13,9 @@ class SphereVisualizer:
         self.diameters = vtk.vtkDoubleArray()
 
         for i in range(N):
-            self.positions.InsertNextPoint(0,0,0)
-            self.diameters.InsertNextValue(0)
+            self.positions.InsertNextPoint(0.,0.,0.)
+            self.diameters.InsertNextValue(0.)
+        print(self.positions.GetNumberOfPoints())
         self.diameters.SetName("diameter")
 
         self.window = self._sphere_render_window()
@@ -49,8 +50,10 @@ class SphereVisualizer:
 
         sphere_source = self._reference_sphere()
         glyph= vtk.vtkGlyph3D()
+        glyph.GeneratePointIdsOn()
         glyph.SetInputData(grid)
         glyph.SetSourceConnection(sphere_source.GetOutputPort())
+        glyph.Update()
 
         mapper = vtk.vtkPolyDataMapper()
         mapper.SetInputConnection(glyph.GetOutputPort())
@@ -78,11 +81,13 @@ class SphereVisualizer:
         self.renderer = renderer
         return render_window
          
-    def update_data(self, positions, di):
+    def update_data(self, positions, ri):
+
         vtk_p = numpy_support.numpy_to_vtk(positions)
-        vtk_d = numpy_support.numpy_to_vtk(di)
+        self.vtk_d = numpy_support.numpy_to_vtk(list(2 * ri)) # memory shenanigans
+        # print(vtk_d)
         self.positions.SetData(vtk_p)
-        self.diameters.SetArray(vtk_d, len(di), 1)
+        self.diameters.SetArray(self.vtk_d, self.N, 1)
 
         self.positions.Modified()
         self.diameters.Modified()
@@ -149,9 +154,14 @@ class SphereAnimation(Animation):
         self.vvv.update_data(self.positions, self.radii)
 
 if __name__ == "__main__":
-    v = SphereVisualizer(2)
+    N  = 1000
+    v = SphereVisualizer(N)
     v.add_box(1,1,1)
-    v.update_data([[0.2, 0.5, 0.5],[0.7, 0.5, 0.5]], [0.4, 0.6])
+   
+    x = np.random.random((N,3))
+    d = np.random.random(N) 
+
+    v.update_data(x, d * 0.1)
     v.show()
     exit()
 

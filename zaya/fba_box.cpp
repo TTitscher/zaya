@@ -2,7 +2,7 @@
 #include <iostream>
 #include <vector>
 
-#include "helper.h"
+#include "src/helper.h"
 
 #define BOXES 1
 

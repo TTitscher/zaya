@@ -5,6 +5,7 @@ import pytest
 from rsa import rsa
 from scipy.spatial import KDTree
 import numba
+from scipy.optimize import root_scalar, newton
 
 from sphere_visu import SphereVisualizer
 import edmd
@@ -21,21 +22,21 @@ def wrapped_euclidean(p, x):
 def factor_in(r, d):
     """
     Calculate the factor_in in 
-        d_i_in = factor_in * d_i 
+        d_i_in = d_i  + min_offset
     such that the spheres (centers `r` and diameters `d`) do not overlap with 
     themselves or the walls.
     """
-    d_spheres = np.inf
+    min_offset = np.inf
     for i in range(len(r)-1):
         current_distance = wrapped_euclidean(r[i+1:len(r)], r[i])
         radii = (d[i+1:len(r)] + d[i]) / 2
         
-        factor = current_distance / radii
-        d_spheres = min(d_spheres, min(factor))
+        offset = (current_distance - radii) 
+        min_offset = min(min_offset, min(offset))
 
-    return d_spheres
+    return min_offset
 
-def factor_out(r, d, eta=1.0):
+def factor_out(d, eta=1.0, guess=None):
     """
     Calculate the factor_out in 
         d_i_out = factor_out * d_i 
@@ -47,14 +48,25 @@ def factor_out(r, d, eta=1.0):
 
     """
     V_box = L**3
-    return (V_box * eta * 6 / np.pi / np.sum(d**3))**(1/3)
+
+    def V(offset):
+        eta_num = np.pi / 6 *np.sum((d + offset)**3) / V_box 
+        return eta_num - eta
+
+    if guess is None:
+        guess = 10.
+    r = newton(V, x0=guess)
+    return r
+    # return r
+
+    # return (V_box * eta * 6 / np.pi / np.sum(d**3))**(1/3)
 
 # @numba.jit(nopython=True)
 def get_dr_sphere(r, d, f_out, rho):
     dr_sphere = np.zeros_like(r)  # delta r resulting from an "overlap force"
     for i in range(len(r)):
 
-        d_out_i, d_out_j = f_out * d[i], f_out * d
+        d_out_i, d_out_j = f_out + d[i], f_out + d
         sigma = (d_out_i + d_out_j) / 2
 
         rji = r - r[i] # unperiodic
@@ -81,14 +93,14 @@ def get_dr_sphere(r, d, f_out, rho):
 
 np.random.seed(6174)
 
-gc = edmd.GradingCurve()
-gc.add_grading_class(2, 4, 0.12)
-gc.add_grading_class(4, 8, 0.24)
-gc.add_grading_class(8, 16, 0.32)
+# gc = edmd.GradingCurve()
+# gc.add_grading_class(2, 4, 0.12)
+# gc.add_grading_class(4, 8, 0.24)
+# gc.add_grading_class(8, 16, 0.32)
 
-box = edmd.Cube(50, 50, 50)
-phi = box.volume() * (0.22 + 0.32 + 0.12)
-radii = gc.sample(phi, 1)
+# box = edmd.Cube(50, 50, 50)
+# phi = box.volume() * (0.22 + 0.32 + 0.12)
+# radii = gc.sample(phi, 1)
 
 N = 100
 # d = 1 *
@@ -99,9 +111,17 @@ d = np.ones(N)
 
 np.random.seed(6174)
 with zaya.TTimer("RSA"):
-    r, _ = rsa(d/2 * 0.01, L=L)
+    r, _ = rsa(d/2, L=L)
     assert r is not None
 
+d_in = factor_in(r, d)
+print(d_in)
+
+print(factor_in(r, d+d_in))
+#
+d_out = factor_out(d)
+
+# exit()
 
 N = len(r)
 
@@ -116,7 +136,7 @@ visu.add_box(L, L, L)
 
 def fba(r, d, rho=0.01, tau=1e4):
 
-    f_out0 = factor_out(r, d, eta=0.99)
+    f_out0 = factor_out(d, eta=0.99)
     f_out = f_out0
     f_in_old = 0
     # assert np.sum(np.pi/6 * (d*f_out)**3) == pytest.approx(0.99)
@@ -133,8 +153,8 @@ def fba(r, d, rho=0.01, tau=1e4):
         # visu.show()
         # if iteration % 10 == 0:
 
-        V_real = np.pi / 6 * np.sum((d*f_in) ** 3) / L**3
-        V_virt = np.pi / 6 * np.sum((d*f_out)**3) / L**3
+        V_real = np.pi / 6 * np.sum((d+f_in) ** 3) / L**3
+        V_virt = np.pi / 6 * np.sum((d+f_out)**3) / L**3
 
         nu = np.ceil(-np.log10(V_virt - V_real))
 
