@@ -44,7 +44,7 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    install_requires=["tabulate"],
+    install_requires=["tabulate", "pybind11"],
     extras_require={  # Optional
         "dev": ["black"],
         "test": ["pytest", "pytest-cov", "flake8"],
