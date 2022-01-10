@@ -47,7 +47,6 @@ def estimate_d_factor_out(eta):
     return 2 * L * (eta / (np.pi * N)) ** 0.5
 
 
-
 np.random.seed(6174)
 N = 27
 L = 1  # box length
@@ -76,9 +75,9 @@ visu.add_box(1, 1, 1)
 
 def factor_in(r, d):
     """
-    Calculate the factor_in in 
-        d_i_in = factor_in * d_i 
-    such that the spheres (centers `r` and diameters `d`) do not overlap with 
+    Calculate the factor_in in
+        d_i_in = factor_in * d_i
+    such that the spheres (centers `r` and diameters `d`) do not overlap with
     themselves or the walls.
     """
     with zaya.TTimer("wall distance"):
@@ -92,32 +91,34 @@ def factor_in(r, d):
                 if i == j:
                     continue
                 current_distance = np.linalg.norm(r[i] - r[j])
-                radii= (d[i] + d[j])/2
+                radii = (d[i] + d[j]) / 2
                 factor = current_distance / radii
                 d_spheres = min(d_spheres, factor)
 
     return min(d_wall, d_spheres)
 
+
 def factor_out(r, d, eta=1.0):
     """
-    Calculate the factor_out in 
-        d_i_out = factor_out * d_i 
-    such that the spheres (centers `r` and diameters `d`) have a volume 
+    Calculate the factor_out in
+        d_i_out = factor_out * d_i
+    such that the spheres (centers `r` and diameters `d`) have a volume
     fraction of `eta`, where the volume fraction is defined as
 
         eta = V_spheres / V_box = sum(pi/6 d³) / V_box
             = pi/6 factor_out³ * sum(d_i³)
 
     """
-    V_box = 1.
-    return (V_box * eta * 6 / np.pi / np.sum(d**3))**(1/3)
+    V_box = 1.0
+    return (V_box * eta * 6 / np.pi / np.sum(d ** 3)) ** (1 / 3)
+
 
 f_in = factor_in(r, d)
-assert factor_in(r, d*f_in) == pytest.approx(1)
-    
+assert factor_in(r, d * f_in) == pytest.approx(1)
+
 f_out0 = factor_out(r, d, eta=0.99)
 f_out = f_out0
-assert np.sum(np.pi/6 * (d*f_out)**3) == pytest.approx(0.99)
+assert np.sum(np.pi / 6 * (d * f_out) ** 3) == pytest.approx(0.99)
 
 tau = 1000
 
@@ -125,17 +126,17 @@ rho = 0.1
 
 
 for iteration in range(10000):
-    f_in = factor_in(r, d) 
+    f_in = factor_in(r, d)
 
     if f_in < 0:
         raise RuntimeError(f"{f_in = } !?")
-    
+
     visu.update_data(r, d * f_in)
     # if iteration % 100 == 0:
     # visu.show()
 
-    V_real = np.pi / 6 * np.sum((d*f_in) ** 3)
-    V_virt = np.pi / 6 * np.sum((d*f_out)**3)
+    V_real = np.pi / 6 * np.sum((d * f_in) ** 3)
+    V_virt = np.pi / 6 * np.sum((d * f_out) ** 3)
 
     nu = np.ceil(-np.log10(V_virt - V_real))
 
@@ -158,37 +159,56 @@ for iteration in range(10000):
                 rji = r[j] - r[i]
                 abs_rji = np.linalg.norm(rji)
 
-                overlap = (d_out_i + d_out_j)/2 - abs_rji
+                overlap = (d_out_i + d_out_j) / 2 - abs_rji
                 if overlap < 0:
                     # accounts for 1_ij in eq.(2)
                     continue
 
                 def V_sphere_intersection(R, r, d):
-                    return np.pi * (R+r-d)**2 * (d**2 + 2*d*r -3 *r**2 + 2*d*R + 6*r*R-3*R**2) / (12 * d)
+                    return (
+                        np.pi
+                        * (R + r - d) ** 2
+                        * (
+                            d ** 2
+                            + 2 * d * r
+                            - 3 * r ** 2
+                            + 2 * d * R
+                            + 6 * r * R
+                            - 3 * R ** 2
+                        )
+                        / (12 * d)
+                    )
 
-                p_ij = d_out_i * d_out_j * (abs_rji**2 / (0.25 * (d_out_i + d_out_j)**2) - 1)
+                p_ij = (
+                    d_out_i
+                    * d_out_j
+                    * (abs_rji ** 2 / (0.25 * (d_out_i + d_out_j) ** 2) - 1)
+                )
                 # sigma = 0.5 * (d_out_i + d_out_j)
                 # p_ij = -(sigma - abs_rji) / sigma
                 # p_ij = -V_sphere_intersection(d_out_i, d_out_j, abs_rji)
                 # p_ij = abs_rji**2 - d_out_i * d_out_j
-#
+                #
                 F_ij = rho * p_ij * rji / abs_rji
                 dr_sphere[i] += F_ij / d[i]
 
     with zaya.TTimer("Force wall"):
-        dr_wall = np.zeros_like(r)  
+        dr_wall = np.zeros_like(r)
         distance_wall = distance_to_unit_cube(r)
 
         current_radius = d * f_out / 2
         allowed_distance_wall = current_radius
-        
-        overlaps = [np.maximum(allowed_distance_wall- distance, 0) for distance in distance_wall]
+
+        overlaps = [
+            np.maximum(allowed_distance_wall - distance, 0)
+            for distance in distance_wall
+        ]
 
         # overlap_V = [1/3 * np.pi * overlap**2 * (3 * current_radius - overlap) for overlap in overlaps]
 
-        scaled_overlaps = [V/current_radius*2 / d for V in overlaps]
-       
-        dr_wall[:, 0] += rho * scaled_overlaps[0] 
+        scaled_overlaps = [V / current_radius * 2 / d for V in overlaps]
+
+        dr_wall[:, 0] += rho * scaled_overlaps[0]
         dr_wall[:, 0] -= rho * scaled_overlaps[1]
 
         dr_wall[:, 1] += rho * scaled_overlaps[2]
@@ -200,13 +220,12 @@ for iteration in range(10000):
     # print(dr_wall)
     # print(dr_sphere)
 
-
     with zaya.TTimer("Update positions"):
         r += dr_wall
         r += dr_sphere
 
     # kappa = min(kappa * 1.01, 0.1)
-    
+
 visu.update_data(r, d * f_in)
 visu.show()
 zaya.list_timings()

@@ -6,7 +6,6 @@ from loguru import logger
 from scipy.optimize import newton
 
 
-
 def sample_grading_class(dmin, dmax, V, chunk=100):
     radii = []
     sampled_volume = 0.0
@@ -33,13 +32,15 @@ def sample_grading_class(dmin, dmax, V, chunk=100):
 
     return np.sort(radii)[::-1]
 
+
 def V(r, dr):
     return 4.0 / 3.0 * np.pi * np.sum((r + dr) ** 3)
 
+
 def fba(x, r, rho=0.001, tau=1e3, iter_max=int(1e6), info_inverval=100):
-    
     def error(dr):
-        return V(r, dr) - 1.
+        return V(r, dr) - 1.0
+
     dr_out0 = newton(error, x0=100)
     print(dr_out0)
 
@@ -52,7 +53,7 @@ def fba(x, r, rho=0.001, tau=1e3, iter_max=int(1e6), info_inverval=100):
         print(f"{dr_in = }")
 
         V_real, V_virt = V(r, dr_in), V(r, dr_out)
-        
+
         info = f"{iteration:5d}: {V_real:6.3f} | {V_virt:6.3f}"
 
         if dr_in > dr_out:
@@ -62,9 +63,7 @@ def fba(x, r, rho=0.001, tau=1e3, iter_max=int(1e6), info_inverval=100):
         if iteration % info_inverval == 0:
             logger.info(info)
 
-
         # print(info)
-
 
         x += dx
         x = np.mod(x, 1.0)

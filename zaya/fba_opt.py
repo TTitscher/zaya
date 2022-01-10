@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import zaya
 import pytest
-from scipy.spatial import distance, KDTree
+from scipy.spatial import KDTree
 import bisect
 
 
@@ -99,7 +99,9 @@ def test():
     assert y1[0] == pytest.approx(0.8)
     assert y1[1] == pytest.approx(0.6)
 
+
 import numba
+
 
 def RSA(N, R, n_tries=1000):
     """
@@ -134,32 +136,33 @@ test()
 # r = 0.1
 
 
+# print(all_neighbors)
+# for i, p in enumerate(x):
+# q = tree.query_ball_point(p, r=2*d_out)
+# print(i in q)
 
-    # print(all_neighbors)
-    # for i, p in enumerate(x):
-        # q = tree.query_ball_point(p, r=2*d_out)
-        # print(i in q)
 
 def sphere_force2(x, sigma, kappa, all_neighbors):
     F_sphere = np.zeros_like(x)
 
     return F_sphere
 
+
 @numba.njit(fastmath=True)
 def sphere_force(x, sigma, kappa, values, idx):
     F_sphere = np.zeros_like(x)
 
     for i_sphere in range(N):
-        indices = values[idx[i_sphere]:idx[i_sphere+1]]
+        indices = values[idx[i_sphere] : idx[i_sphere + 1]]
 
         diffs = x[i_sphere] - x[indices]
 
-        deltas = (diffs[:,0]**2 + diffs[:,1]**2)**0.5
+        deltas = (diffs[:, 0] ** 2 + diffs[:, 1] ** 2) ** 0.5
         # deltas = np.linalg.norm(diffs, axis=1)
 
-        Ps = np.maximum((sigma**2- deltas**2) / sigma**2, 0)
+        Ps = np.maximum((sigma ** 2 - deltas ** 2) / sigma ** 2, 0)
         # assert np.all(Ps < 1)
-        factor = kappa / sigma* Ps / deltas
+        factor = kappa / sigma * Ps / deltas
         factor = factor.reshape(-1, 1)
 
         F = np.sum(diffs * factor, axis=0)
@@ -177,17 +180,13 @@ def fba(x):
 
     kappa = 0.05 / N
 
-
     for iteration in range(100000):
         with zaya.TTimer("KDTree| build"):
             if iteration < 10 or iteration % 100 == 0:
                 tree = KDTree(x)
 
-    
-
         d = d_in(x, tree)
         if d < 0:
-            show_circles_and_force(x, d, d_out, F_wall, F_sphere)
             raise RuntimeError(f"{d = } !?")
         # V_real = N * np.pi / (6 * L ** 3) * d ** 3
         # V_virt = N * np.pi / (6 * L ** 3) * d_out_old ** 3
@@ -203,7 +202,6 @@ def fba(x):
         nu = np.ceil(-np.log10(dV))
         d_out -= 0.5 ** nu * d_out0 / (2 * tau)
 
-
         with zaya.TTimer("Force wall"):
             F_wall = np.zeros_like(x)  # something like an "overlap force"
             distance_wall = distance_to_unit_cube(x)
@@ -211,7 +209,7 @@ def fba(x):
             sigma_wall = d_out / 2.0
 
             Pwall = [
-                np.maximum((sigma_wall**2 - distance**2) / sigma_wall**2, 0)
+                np.maximum((sigma_wall ** 2 - distance ** 2) / sigma_wall ** 2, 0)
                 for distance in distance_wall
             ]
             # print(Pwall[0])
@@ -231,7 +229,7 @@ def fba(x):
             with zaya.TTimer("Force spheres"):
                 sigma_sphere = d_out
                 with zaya.TTimer("KDTree| querry all"):
-                    all_neighbors = tree.query_ball_point(x, r=3*sigma_sphere)
+                    all_neighbors = tree.query_ball_point(x, r=3 * sigma_sphere)
 
                 with zaya.TTimer("KDTree| remove"):
                     idx = [0]
@@ -241,16 +239,16 @@ def fba(x):
                     values = np.concatenate(all_neighbors, dtype=int, casting="unsafe")
                     idx = np.array(idx)
 
-
         F_sphere = sphere_force(x, sigma_sphere, kappa, values, idx)
-                    
+
         with zaya.TTimer("Update positions"):
             x += F_wall
             x += F_sphere
 
         # kappa = min(kappa*1.01, 0.1)
-    
+
     return x, d, d_out
+
 
 np.random.seed(6175)
 N = 500
