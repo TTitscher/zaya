@@ -167,7 +167,6 @@ def sphere_force(x, sigma, kappa, values, idx):
     return F_sphere
 
 
-@profile
 def fba(x):
     d_out0 = estimate_d(1.0)
     d_out = d_out0
