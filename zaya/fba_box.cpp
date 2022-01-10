@@ -45,10 +45,10 @@ void DxSphere(const RowMatrixXd& x, const Eigen::VectorXd& r, double f_out, doub
         const double ri = r[i];
         auto dxi = dx.row(i);
 
-        for (int j : boxes.Neighbors(xi, ri * f_out))
+        for (int j : boxes.Neighbors(xi, ri * f_out, i))
         {
-            if (j == i)
-                continue;
+            // if (j == i)
+            // continue;
 
             const double r_out_i = f_out * ri;
             const double r_out_j = f_out * r[j];

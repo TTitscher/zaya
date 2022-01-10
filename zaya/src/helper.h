@@ -79,7 +79,7 @@ public:
         return _boxes.at(id);
     }
 
-    std::vector<int> Neighbors(Eigen::Vector3d x, double r) const
+    std::vector<int> Neighbors(Eigen::Vector3d x, double r, int to_del = 0) const
     {
         std::vector<int> n;
 
@@ -91,6 +91,7 @@ public:
             std::inplace_merge(n.begin(), n.begin() + size, n.end());
         }
         n.erase(std::unique(n.begin(), n.end()), n.end());
+        n.erase(std::remove(n.begin(), n.end(), to_del), n.end());
         return n;
     }
 
