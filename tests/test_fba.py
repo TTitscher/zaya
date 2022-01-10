@@ -5,10 +5,22 @@ import numpy as np
 
 def main():
     np.random.seed(0)
-    N = 4
-    r = np.random.choice([0.1, 0.3], N)
-    FACTOR = 1.0
-    print(zaya.particles.V(r * FACTOR, 0.0))
+    N = 500
+    r = np.random.uniform(2, 16, N)
+    r = np.ones(N)
+    r = np.sort(r)[::-1] 
+    r *= 0.5 / r[0]
+    # print(r)
+    while(True):
+        try:
+            print("Running RSA", flush=True)
+            x = zaya.particles.cpp.rsa(r, 1000)
+            break
+        except:
+            r *= 0.95
+
+    print(zaya.particles.V(r, 0))
+    
     # r*= 0.02
     # return
 
@@ -16,29 +28,35 @@ def main():
     visu.add_box(1, 1, 1)
 
     # return
-    x = zaya.particles.cpp.rsa(r * FACTOR + 0.01, 1000)
+    # print(x)
 
-    for i in range(N):
-        for j in range(i + 1, N):
-            d = np.linalg.norm(x[i] - x[j])
-            rs = r[i] + r[j]
-            print(d, rs, d > rs)
+    # print(r)
+    if False:
+        for i in range(N):
+            for j in range(i + 1, N):
+                rji = x[i] - x[j]
+                correction = np.round(rji)
 
-    return
+                d = np.linalg.norm(rji - correction)
+                rs = r[i] + r[j]
+                if d < rs:
+                    print(i, j, d, rs, d > rs)
+                
+        return
 
-    visu.update_data(x, r * FACTOR)
-    visu.show()
+    visu.update_data(x, r)
+    # visu.show()
 
     with zaya.TTimer("FBA"):
-        x, dr = zaya.particles.fba(x, r, rho=0.001, info_inverval=1, iter_max=100)
+        x, dr = zaya.particles.fba(x, r, rho=0.001, info_inverval=1000, iter_max=1e7, tau=1e4)
 
     # print(zaya.particles.V(r*FACTOR, dr))
     #
-    # print(x, dr)
-    # visu.update_data(x, r*FACTOR)
-    # visu.show()
-    # visu.update_data(x, r*FACTOR+dr)
-    # visu.show()
+    print("dr = ", dr)
+    visu.update_data(x, r+dr)
+    visu.show()
+    visu.update_data(x, r)
+    visu.show()
     #
 
     zaya.list_timings()

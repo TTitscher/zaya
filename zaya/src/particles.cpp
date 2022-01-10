@@ -1,5 +1,6 @@
 #include <pybind11/eigen.h>
 #include <pybind11/pybind11.h>
+#include <iostream>
 
 #include <Eigen/Core>
 #include "helper.h"
@@ -10,7 +11,7 @@ using RowMatrixXd = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen:
 
 Eigen::Vector3d PeriodicDistance(const Eigen::Vector3d& xi, const Eigen::Vector3d& xj)
 {
-    Eigen::Vector3d rji = xi - xj;
+    const Eigen::Vector3d rji_unperiodic = xi - xj;
     // we need to account for the periodicity of the structure
     // and also consider the "ghost" neighbors, i.e. this situation
     //
@@ -22,15 +23,8 @@ Eigen::Vector3d PeriodicDistance(const Eigen::Vector3d& xi, const Eigen::Vector3
     //
     // where the vector through the boundary can be shorter than the
     // vector within the box.
-
-    for (int k = 0; k < 3; ++k)
-    {
-        auto abs_diff = std::abs(rji[k]);
-        int sign = static_cast<int>((0. < rji[k]) - (rji[k] < 0.));
-
-        rji[k] -= (abs_diff > 1 - abs_diff) * sign;
-    }
-    return rji;
+    const Eigen::Vector3d correction = Eigen::round(rji_unperiodic.array());
+    return rji_unperiodic - correction;
 }
 
 double DxSphere(const RowMatrixXd& x, const Eigen::VectorXd& r, double dr, double rho, Eigen::Ref<RowMatrixXd> dx)
@@ -42,34 +36,40 @@ double DxSphere(const RowMatrixXd& x, const Eigen::VectorXd& r, double dr, doubl
     for (int i = 0; i < r.rows(); ++i)
         boxes.Add(i, x.row(i), r[i] + dr);
 
-    for (int i = 0; i < r.rows(); ++i)
+#pragma omp parallel shared(dx, r, x, boxes)
     {
-        const Eigen::Vector3d& xi = x.row(i);
-        const double ri = r[i];
-        auto dxi = dx.row(i);
+        double min_dr = dr_in;
 
-        for (int j : boxes.Neighbors(xi, ri + dr))
+#pragma omp for
+        for (int i = 0; i < r.rows(); ++i)
         {
-            if (j == i)
-                continue;
+            const double ri = r[i];
+            auto dxi = dx.row(i);
 
-            const double r_out_i = ri + dr;
-            const double r_out_j = r[j] + dr;
-            const double sigma = r_out_i + r_out_j;
+            for (int j : boxes.Neighbors(x.row(i), ri + dr, i))
+            {
+                const double r_out_i = ri + dr;
+                const double r_out_j = r[j] + dr;
+                const double sigma = r_out_i + r_out_j;
 
-            Eigen::Vector3d rji = PeriodicDistance(xi, x.row(j));
-            const double abs_rji = rji.norm();
+                Eigen::Vector3d rji = PeriodicDistance(x.row(i), x.row(j));
+                const double abs_rji2 = rji.squaredNorm();
 
-            const double allowed_distance = ri + r[j];
-            dr_in = std::min(dr_in, 0.5 * (abs_rji - allowed_distance));
+                if (abs_rji2 > sigma * sigma)
+                    continue;
 
-            if (abs_rji > sigma)
-                continue;
+                const double abs_rji = sqrt(abs_rji2);
 
-            const double inv_sigma2 = 1 / sigma / sigma;
-            const double p_ij = 4 * r_out_i * r_out_j * (1 - abs_rji * abs_rji * inv_sigma2) * inv_sigma2;
-            dxi += rho * p_ij / ri * rji / abs_rji;
+                const double allowed_distance = ri + r[j];
+                min_dr = std::min(min_dr, 0.5 * (abs_rji - allowed_distance));
+
+                const double inv_sigma2 = 1 / sigma / sigma;
+                const double p_ij = 4 * r_out_i * r_out_j * (1 - abs_rji * abs_rji * inv_sigma2) * inv_sigma2;
+                dxi += rho * p_ij / ri * rji / abs_rji;
+            }
         }
+#pragma omp critical
+        dr_in = std::min(dr_in, min_dr);
     }
     return dr_in;
 }
@@ -80,8 +80,8 @@ RowMatrixXd RSA(Eigen::VectorXd r, int max_tries = 1e5)
 
     // The emptier the box, the more likely a large particle will fit.
     // So we add them in descending volume.
-    std::sort(r.data(), r.data() + r.size(), std::greater<double>());
-
+    if (not std::is_sorted(r.data(), r.data() + r.size(), std::greater<double>()))
+        throw 0;
     helper::SubBoxes boxes(1., r[0]);
 
     for (int i = 0; i < r.rows(); ++i)
@@ -101,10 +101,9 @@ RowMatrixXd RSA(Eigen::VectorXd r, int max_tries = 1e5)
             xi.array() += 0.5; // 0, 1
 
             bool overlap = false;
-            for (int j : boxes.Neighbors(xi, ri))
+            for (int j : boxes.Neighbors(xi, ri, i))
             {
-                Eigen::Vector3d rji = PeriodicDistance(xi, x.row(j));
-                const double abs_rji = rji.norm();
+                const double abs_rji = PeriodicDistance(xi, x.row(j)).norm();
 
                 if (abs_rji < (ri + r[j]))
                 {
@@ -114,7 +113,6 @@ RowMatrixXd RSA(Eigen::VectorXd r, int max_tries = 1e5)
             }
             if (not overlap)
             {
-                // std::cout << "Add " << xi.transpose() << std::endl;
                 x.row(i) = xi;
                 boxes.Add(i, xi, ri);
                 break;

@@ -1,6 +1,7 @@
 #pragma once
 #include <algorithm>
 #include <eigen3/Eigen/Core>
+#include <iostream>
 
 namespace helper
 {
@@ -16,7 +17,7 @@ public:
 
     bool Init(double r)
     {
-        int n = _l / (2 * r);
+        int n = std::floor(_l / (2 * r));
         if (_n == n)
             return false;
 
@@ -28,25 +29,24 @@ public:
     }
 
 
-    int Id(int i, int j, int k) const
+    inline int Id(int i, int j, int k) const
     {
         return i * _n * _n + j * _n + k;
     }
-    int Idk(double x) const
+    inline int Idk(double x) const
     {
         return floor(x * _n / _l);
     }
 
-    std::vector<int> Ids(Eigen::Vector3d x, double r) const
+    inline std::vector<int> Ids(Eigen::Vector3d x, double r) const
     {
-        // std::cout << "x = " << x.transpose() << " r = " << r << std::endl;
-        int xs = Idk(x.x() - r);
-        int ys = Idk(x.y() - r);
-        int zs = Idk(x.z() - r);
+        const int xs = Idk(x.x() - r);
+        const int ys = Idk(x.y() - r);
+        const int zs = Idk(x.z() - r);
 
-        int xe = Idk(x.x() + r);
-        int ye = Idk(x.y() + r);
-        int ze = Idk(x.z() + r);
+        const int xe = Idk(x.x() + r);
+        const int ye = Idk(x.y() + r);
+        const int ze = Idk(x.z() + r);
 
         std::vector<int> ids;
         for (int x = xs; x <= xe; ++x)
@@ -56,9 +56,9 @@ public:
                 for (int z = zs; z <= ze; ++z)
                 {
                     // wrap coords around _n
-                    int xmod = (x + _n) % _n;
-                    int ymod = (y + _n) % _n;
-                    int zmod = (z + _n) % _n;
+                    const int xmod = (x + _n) % _n;
+                    const int ymod = (y + _n) % _n;
+                    const int zmod = (z + _n) % _n;
                     // std::cout << xmod << " " << ymod << " " << zmod << std::endl;
                     ids.push_back(Id(xmod, ymod, zmod));
                 }
@@ -74,18 +74,14 @@ public:
             _boxes.at(box_id).push_back(id);
     }
 
-    const std::vector<int>& Get(int id) const
-    {
-        return _boxes.at(id);
-    }
-
-    std::vector<int> Neighbors(Eigen::Vector3d x, double r, int to_del = 0) const
+    std::vector<int> Neighbors(Eigen::Vector3d x, double r, int to_del) const
     {
         std::vector<int> n;
+        // n.reserve(20);
 
         for (int id : Ids(x, r))
         {
-            const auto& box = Get(id);
+            const auto& box = _boxes.at(id);
             int size = n.size();
             n.insert(n.end(), box.begin(), box.end());
             std::inplace_merge(n.begin(), n.begin() + size, n.end());

@@ -1,5 +1,6 @@
 import setuptools
 import os
+from setuptools import Extension 
 
 # Available at setup time due to pyproject.toml
 from pybind11.setup_helpers import Pybind11Extension, build_ext
@@ -12,11 +13,12 @@ EIGEN_INCLUDE_DIR = os.environ.get("ZAYA_EIGEN_DIR", "/usr/include/eigen3")
 ext_modules = [
     Pybind11Extension(
         "zaya._particles",
-        ["zaya/src/particles.cpp"],
+        sources = ["zaya/src/particles.cpp"],
         # Example: passing in the version to the compiled code
-        define_macros=[("VERSION_INFO", __version__)],
-        extra_compile_args=["-Wall"],
-        language="c++",
+        # define_macros=[("VERSION_INFO", __version__)],
+        extra_compile_args=["-fopenmp"],
+        language = "c++",
+        extra_link_args=["-lgomp"],
         include_dirs=[EIGEN_INCLUDE_DIR],
     ),
 ]

@@ -33,11 +33,14 @@ def sample_grading_class(dmin, dmax, V, chunk=100):
     return np.sort(radii)[::-1]
 
 
-def V(r, dr):
+def V(r, dr=0.0):
     return 4.0 / 3.0 * np.pi * np.sum((r + dr) ** 3)
 
 
-def fba(x, r, rho=0.001, tau=1e3, iter_max=int(1e6), info_inverval=100):
+def fba(x, r, rho=0.001, tau=1e3, iter_max=1e6, info_inverval=100):
+    iter_max = int(iter_max)
+    info_inverval = int(info_inverval)
+
     def error(dr):
         return V(r, dr) - 1.0
 
@@ -48,9 +51,11 @@ def fba(x, r, rho=0.001, tau=1e3, iter_max=int(1e6), info_inverval=100):
 
     dx = np.empty_like(x)
 
+    last_valid_dr_in = 0.0
+
     for iteration in range(iter_max):
         dr_in = cpp.dx_sphere(x, r, dr_out, rho, dx)
-        print(f"{dr_in = }")
+        # print(f"{dr_in = }")
 
         V_real, V_virt = V(r, dr_in), V(r, dr_out)
 
@@ -70,5 +75,6 @@ def fba(x, r, rho=0.001, tau=1e3, iter_max=int(1e6), info_inverval=100):
 
         nu = np.ceil(-np.log10(V_virt - V_real))
         dr_out -= 0.5 ** nu * dr_out / (2.0 * tau)
+        last_valid_dr_in = dr_in
 
-    return x, dr_in
+    return x, last_valid_dr_in

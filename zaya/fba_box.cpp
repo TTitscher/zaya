@@ -1,6 +1,7 @@
 #include <cmath>
 #include <iostream>
 #include <vector>
+#include <chrono>
 
 #include "src/helper.h"
 
@@ -39,54 +40,53 @@ void DxSphere(const RowMatrixXd& x, const Eigen::VectorXd& r, double f_out, doub
     for (int i = 0; i < r.rows(); ++i)
         boxes.Add(i, x.row(i), r[i] * f_out);
 
-    for (int i = 0; i < r.rows(); ++i)
+#pragma omp parallel shared(dx, r, x, boxes)
     {
-        const Eigen::Vector3d& xi = x.row(i);
-        const double ri = r[i];
-        auto dxi = dx.row(i);
-
-        for (int j : boxes.Neighbors(xi, ri * f_out, i))
+        double min_f = f_in;
+#pragma omp for
+        for (int i = 0; i < r.rows(); ++i)
         {
-            // if (j == i)
-            // continue;
+            const double ri = r[i];
+            auto dxi = dx.row(i);
 
-            const double r_out_i = f_out * ri;
-            const double r_out_j = f_out * r[j];
-            const double sigma = r_out_i + r_out_j;
-
-            const Eigen::Vector3d& xj = x.row(j);
-            Eigen::Vector3d rji = xi - xj;
-            // we need to account for the periodicity of the structure
-            // and also consider the "ghost" neighbors, i.e. this situation
-            //
-            //    +-----------------+
-            //    |                 |
-            //    |->O          O>--|
-            //    |                 |
-            //    +-----------------+
-            //
-            // where the vector through the boundary can be shorter than the
-            // vector within the box.
-
-            for (int k = 0; k < 3; ++k)
+            // for (int j = i + 1; j < r.rows(); ++j)
+            for (int j : boxes.Neighbors(x.row(i), ri * f_out, i))
             {
-                auto abs_diff = std::abs(rji[k]);
-                int sign = static_cast<int>((0. < rji[k]) - (rji[k] < 0.));
+                const double r_out_i = f_out * ri;
+                const double r_out_j = f_out * r[j];
+                const double sigma = r_out_i + r_out_j;
 
-                rji[k] -= (abs_diff > 1 - abs_diff) * sign;
+                const Eigen::Vector3d rji_unperiodic = x.row(i) - x.row(j);
+                // we need to account for the periodicity of the structure
+                // and also consider the "ghost" neighbors, i.e. this situation
+                //
+                //    +-----------------+
+                //    |                 |
+                //    |->O          O>--|
+                //    |                 |
+                //    +-----------------+
+                //
+                // where the vector through the boundary can be shorter than the
+                // vector within the box.
+                const Eigen::Vector3d correction = Eigen::round(rji_unperiodic.array());
+                const Eigen::Vector3d rji = rji_unperiodic - correction;
+                const double abs_rji2 = rji.squaredNorm();
+
+                if (abs_rji2 > sigma * sigma)
+                    continue;
+
+                const double abs_rji = sqrt(abs_rji2);
+                const double allowed_distance = ri + r[j];
+                min_f = std::min(min_f, abs_rji / allowed_distance);
+
+
+                const double inv_sigma2 = 1 / sigma / sigma;
+                const double p_ij = 4 * r_out_i * r_out_j * (1 - abs_rji2 * inv_sigma2) * inv_sigma2;
+                dxi += rho * p_ij / ri * rji / abs_rji;
             }
-            const double abs_rji = rji.norm();
-
-            const double allowed_distance = ri + r[j];
-            f_in = std::min(f_in, abs_rji / allowed_distance);
-
-            if (abs_rji > sigma)
-                continue;
-
-            const double inv_sigma2 = 1 / sigma / sigma;
-            const double p_ij = 4 * r_out_i * r_out_j * (1 - abs_rji * abs_rji * inv_sigma2) * inv_sigma2;
-            dxi += rho * p_ij / ri * rji / abs_rji;
         }
+#pragma omp critical
+        f_in = std::min(min_f, f_in);
     }
 }
 
@@ -104,9 +104,9 @@ void FBA(RowMatrixXd x, const Eigen::VectorXd& r, double rho, double tau)
 
         // std::cout << x.minCoeff() << std::endl;
         // std::cout << x.maxCoeff() << std::endl;
+        //
         double f_in = 1000.;
         DxSphere(x, r, f_out, rho, f_in, dx);
-
 
         const double V_real = Volume(r, f_in);
         const double V_virt = Volume(r, f_out);
@@ -116,23 +116,11 @@ void FBA(RowMatrixXd x, const Eigen::VectorXd& r, double rho, double tau)
 
 
         if (f_in > f_out)
-            return;
-
+            break;
 
         x += dx;
-        for (int irow = 0; irow < r.rows(); ++irow)
-        {
-            for (int icol = 0; icol < 3; ++icol)
-            {
-                while (x(irow, icol) < 0.)
-                    x(irow, icol) += 1.;
-                while (x(irow, icol) >= 1.)
-                    x(irow, icol) -= 1.;
-
-                // if x(irow, icol) >= 0.);
-                // assert(x(irow, icol) < 1.);
-            }
-        }
+        RowMatrixXd x_periodic = Eigen::floor(x.array());
+        x -= x_periodic;
         // std::cout << x << std::endl;
         // const double num = 1.;
         // auto mod_matrix = (x.array() - (num * (x.array() / num))).matrix();
