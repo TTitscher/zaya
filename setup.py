@@ -44,7 +44,7 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    install_requires=["tabulate", "pybind11", "numpy", "loguru", "scipy", "vtk"],
+    install_requires=["tabulate", "numpy", "loguru", "scipy", "vtk"],
     extras_require={  # Optional
         "dev": ["black"],
         "test": ["pytest", "pytest-cov", "flake8"],
