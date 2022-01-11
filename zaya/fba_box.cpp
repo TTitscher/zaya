@@ -5,121 +5,49 @@
 
 #include "src/helper.h"
 
-#define BOXES 1
-
-
-double FactorOut(const Eigen::VectorXd& r, double eta = 1.)
+double DrOut(Eigen::VectorXd r, Eigen::VectorXd box, double eta = 1.)
 {
-    const double V_box = 1.;
-    double d3 = 0.;
-    for (int i = 0; i < r.rows(); ++i)
-    {
-        d3 += std::pow(2. * r[i], 3.);
-    }
-    return std::cbrt(V_box * eta * 6. / M_PI / d3);
+    const double V_box = box.prod();
+    return std::cbrt(V_box * eta * 3. / 4. / M_PI / r.rows()) - r[0];
 }
 
-double Volume(const Eigen::VectorXd& r, double factor)
+double Volume(const Eigen::VectorXd& r, double dr)
 {
     double r3 = 0.;
     for (int i = 0; i < r.rows(); ++i)
     {
-        r3 += std::pow(factor * r[i], 3.);
+        r3 += std::pow(r[i] + dr, 3.);
     }
     return 4. / 3. * M_PI * r3;
 }
 
-using RowMatrixXd = Eigen::Matrix<double, Eigen::Dynamic, 3, Eigen::RowMajor>;
-
-void DxSphere(const RowMatrixXd& x, const Eigen::VectorXd& r, double f_out, double rho, double& f_in,
-              Eigen::Ref<RowMatrixXd> dx)
+void FBA(helper::RowMatrixXd x, const Eigen::VectorXd& r, Eigen::Vector3d box, double rho, double tau)
 {
-    dx.setZero();
+    const double dr0 = DrOut(r, box, 1.);
+    double dr = dr0;
 
-    helper::SubBoxes boxes(1., r.maxCoeff() * f_out);
-    for (int i = 0; i < r.rows(); ++i)
-        boxes.Add(i, x.row(i), r[i] * f_out);
+    std::cout << dr << std::endl;
+    std::cout << Volume(r, dr) / box.prod() << std::endl;
 
-#pragma omp parallel shared(dx, r, x, boxes)
-    {
-        double min_f = f_in;
-#pragma omp for
-        for (int i = 0; i < r.rows(); ++i)
-        {
-            const double ri = r[i];
-            auto dxi = dx.row(i);
-
-            // for (int j = i + 1; j < r.rows(); ++j)
-            for (int j : boxes.Neighbors(x.row(i), ri * f_out, i))
-            {
-                const double r_out_i = f_out * ri;
-                const double r_out_j = f_out * r[j];
-                const double sigma = r_out_i + r_out_j;
-
-                const Eigen::Vector3d rji_unperiodic = x.row(i) - x.row(j);
-                // we need to account for the periodicity of the structure
-                // and also consider the "ghost" neighbors, i.e. this situation
-                //
-                //    +-----------------+
-                //    |                 |
-                //    |->O          O>--|
-                //    |                 |
-                //    +-----------------+
-                //
-                // where the vector through the boundary can be shorter than the
-                // vector within the box.
-                const Eigen::Vector3d correction = Eigen::round(rji_unperiodic.array());
-                const Eigen::Vector3d rji = rji_unperiodic - correction;
-                const double abs_rji2 = rji.squaredNorm();
-
-                if (abs_rji2 > sigma * sigma)
-                    continue;
-
-                const double abs_rji = sqrt(abs_rji2);
-                const double allowed_distance = ri + r[j];
-                min_f = std::min(min_f, abs_rji / allowed_distance);
-
-
-                const double inv_sigma2 = 1 / sigma / sigma;
-                const double p_ij = 4 * r_out_i * r_out_j * (1 - abs_rji2 * inv_sigma2) * inv_sigma2;
-                dxi += rho * p_ij / ri * rji / abs_rji;
-            }
-        }
-#pragma omp critical
-        f_in = std::min(min_f, f_in);
-    }
-}
-
-void FBA(RowMatrixXd x, const Eigen::VectorXd& r, double rho, double tau)
-{
-    const double f_out0 = FactorOut(r, 1.);
-    double f_out = f_out0;
-
-    RowMatrixXd dx = RowMatrixXd::Zero(r.rows(), 3);
+    helper::RowMatrixXd dx = helper::RowMatrixXd::Zero(r.rows(), 3);
+    helper::RowMatrixXd x_periodic(r.rows(), 3);
 
     for (int iteration = 0; iteration < 10000; ++iteration)
     {
-        // std::cout << f_out << std::endl;
+        double dr_in = helper::DxSphere(x, r, box, dr, rho, dx);
 
-
-        // std::cout << x.minCoeff() << std::endl;
-        // std::cout << x.maxCoeff() << std::endl;
-        //
-        double f_in = 1000.;
-        DxSphere(x, r, f_out, rho, f_in, dx);
-
-        const double V_real = Volume(r, f_in);
-        const double V_virt = Volume(r, f_out);
+        const double V_real = Volume(r, dr_in) / box.prod();
+        const double V_virt = Volume(r, dr) / box.prod();
 
         const double nu = ceil(-log10(V_virt - V_real));
         std::cout << iteration << ": " << V_real << " | " << V_virt << " | " << nu << " | " << std::endl;
 
-
-        if (f_in > f_out)
+        if (dr_in > dr)
             break;
 
         x += dx;
-        RowMatrixXd x_periodic = Eigen::floor(x.array());
+        for (int i : {0, 1, 2})
+            x_periodic.col(i) = box[i] * Eigen::floor(x.col(i).array() / box[i]);
         x -= x_periodic;
         // std::cout << x << std::endl;
         // const double num = 1.;
@@ -128,7 +56,7 @@ void FBA(RowMatrixXd x, const Eigen::VectorXd& r, double rho, double tau)
         // x = mod_matrix;
         // auto y = x.unaryExpr(std::fmod);
         // x = y;
-        f_out -= pow(0.5, nu) * f_out / (2 * tau);
+        dr -= pow(0.5, nu) * dr0 / (2. * tau);
     }
 }
 
@@ -136,7 +64,7 @@ void FBA(RowMatrixXd x, const Eigen::VectorXd& r, double rho, double tau)
 int main(int argc, char* argv[])
 {
     const double L = 1.;
-    int N = 10;
+    int N = 100;
     try
     {
         N = std::stoi(argv[1]);
@@ -147,14 +75,16 @@ int main(int argc, char* argv[])
     // int N = 100;
     // Eigen::MatrixX3d x(2, 3);
     // x << 0.9, 0.1, 0.5, 0.2, 0.8, 0.5;
-    // std::cout << x << std::endl;
 
-    RowMatrixXd x = Eigen::MatrixX3d::Random(N, 3) * 0.5;
-    x.array() += 0.5;
-    Eigen::VectorXd r = Eigen::VectorXd::Random(x.rows());
-    r.array() += 1.1;
+    Eigen::Vector3d box(1, 2, 3);
 
-    FBA(x, r, 0.01, 1000);
+    Eigen::VectorXd r = 0.01 * Eigen::VectorXd::Ones(N);
+    std::cout << Volume(r, 0.) / box.prod() << std::endl;
+
+    auto x = helper::RSA(r, box);
+
+
+    FBA(x, r, box, 0.0001, 1000.);
 
 
     // std::cout << FactorIn(x, r) << std::endl;

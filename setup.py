@@ -1,6 +1,11 @@
 import setuptools
 import os
 from setuptools import Extension 
+import site
+import sys
+
+# https://github.com/googlefonts/fontmake/commit/164b24fd57c062297bf68b21c8ae88bc676f090b
+site.ENABLE_USER_SITE = "--user" in sys.argv[1:]
 
 # Available at setup time due to pyproject.toml
 from pybind11.setup_helpers import Pybind11Extension, build_ext

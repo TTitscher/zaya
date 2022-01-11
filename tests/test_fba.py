@@ -48,7 +48,7 @@ def main():
     # visu.show()
 
     with zaya.TTimer("FBA"):
-        x, dr = zaya.particles.fba(x, r, rho=0.001, info_inverval=1000, iter_max=1e7, tau=1e4)
+        x, dr = zaya.particles.fba(x, r, rho=0.001, info_inverval=100, iter_max=1e7, tau=1e3)
 
     # print(zaya.particles.V(r*FACTOR, dr))
     #
