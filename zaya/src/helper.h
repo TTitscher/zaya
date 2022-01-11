@@ -34,7 +34,7 @@ public:
         return i * _n.y() * _n.z() + j * _n.z() + k;
     }
 
-    inline std::vector<int> Ids(Eigen::Vector3d x, double r) const
+    std::vector<int> Ids(Eigen::Vector3d x, double r) const
     {
         const int xs = floor((x.x() - r) * _n.x() / _l.x());
         const int ys = floor((x.y() - r) * _n.y() / _l.y());
@@ -94,7 +94,8 @@ public:
 
 using RowMatrixXd = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
 
-Eigen::Vector3d PeriodicDistance(const Eigen::Vector3d& xi, const Eigen::Vector3d& xj, const Eigen::Vector3d& box)
+inline Eigen::Vector3d PeriodicDistance(const Eigen::Vector3d& xi, const Eigen::Vector3d& xj,
+                                        const Eigen::Vector3d& box)
 {
     const Eigen::Vector3d rji_unperiodic = xi - xj;
     // we need to account for the periodicity of the structure
@@ -113,16 +114,18 @@ Eigen::Vector3d PeriodicDistance(const Eigen::Vector3d& xi, const Eigen::Vector3
 }
 
 double DxSphere(const RowMatrixXd& x, const Eigen::VectorXd& r, const Eigen::Vector3d box, double dr, double rho,
-                Eigen::Ref<RowMatrixXd> dx)
+                Eigen::Ref<RowMatrixXd> dx, SubBoxes& boxes)
 {
-    dx.setZero();
     double dr_in = 1000.;
 
-    SubBoxes boxes(box, r.maxCoeff() + dr);
+    boxes.Init(r.maxCoeff() + dr);
+    for (auto& box : boxes._boxes)
+        box.clear();
+
     for (int i = 0; i < r.rows(); ++i)
         boxes.Add(i, x.row(i), r[i] + dr);
 
-#pragma omp parallel shared(dx, r, x, boxes)
+#pragma omp parallel
     {
         double min_dr = dr_in;
 
@@ -130,60 +133,33 @@ double DxSphere(const RowMatrixXd& x, const Eigen::VectorXd& r, const Eigen::Vec
         for (int i = 0; i < r.rows(); ++i)
         {
             const double ri = r[i];
-            auto dxi = dx.row(i);
+            Eigen::Vector3d dxi = Eigen::Vector3d::Zero();
+            const double r_out_i = ri + dr;
 
             auto neighbors = boxes.Neighbors(x.row(i), ri + dr, i);
-
-            const auto xj = x(neighbors, Eigen::indexing::all);
-            const Eigen::VectorXd rj = r(neighbors);
-
-            const double r_out_i = ri + dr;
-            const Eigen::VectorXd r_out_j = rj.array() + dr;
-            const Eigen::VectorXd allowed_distances = rj.array() + ri;
-            const Eigen::VectorXd sigma = r_out_i + r_out_j.array();
-
-            RowMatrixXd rjis(neighbors.size(), 3);
-            for (int k = 0; k < 3; ++k)
+            for (int j : neighbors)
             {
-                Eigen::VectorXd rji_unperiodic_k = x(i, k) - xj.col(k).array();
-                Eigen::VectorXd correction_k = box[k] * Eigen::round(rji_unperiodic_k.array() / box[k]);
-                rjis.col(k) = rji_unperiodic_k - correction_k;
+                const double r_out_j = r[j] + dr;
+                const double sigma = r_out_i + r_out_j;
+                const double sigma2 = sigma * sigma;
+                Eigen::Vector3d rji = PeriodicDistance(x.row(i), x.row(j), box);
+                const double abs_rji2 = rji.squaredNorm();
+
+
+                if (abs_rji2 > sigma2)
+                    continue;
+
+                const double abs_rji = std::sqrt(abs_rji2);
+
+                const double allowed_distance = r[j] + ri;
+
+                min_dr = std::min(min_dr, (abs_rji - allowed_distance) / 2.);
+
+                const double inv_sigma2 = 1 / sigma2;
+                const double p_ij = 4 * r_out_i * r_out_j * (1 - abs_rji2 * inv_sigma2) * inv_sigma2;
+                dxi += p_ij / ri * rji / abs_rji;
             }
-            const Eigen::VectorXd abs_rji2s = rjis.rowwise().squaredNorm();
-            const Eigen::VectorXd abs_rjis = abs_rji2s.cwiseSqrt();
-
-
-            min_dr = std::min(min_dr, 0.5 * (abs_rjis - allowed_distances).minCoeff());
-
-            const Eigen::VectorXd inv_sigma2s = 1 / (sigma.array() * sigma.array());
-
-            const Eigen::VectorXd p_ijs =
-                    (4 * r_out_i * r_out_j.array() * (1 - abs_rjis.array() * abs_rjis.array() * inv_sigma2s.array()) *
-                     inv_sigma2s.array())
-                            .cwiseMax(0.);
-
-            dxi[0] = (rho * p_ijs.array() / ri * rjis.col(0).array() / abs_rjis.array()).sum();
-            dxi[1] = (rho * p_ijs.array() / ri * rjis.col(1).array() / abs_rjis.array()).sum();
-            dxi[2] = (rho * p_ijs.array() / ri * rjis.col(2).array() / abs_rjis.array()).sum();
-
-            // for (int k = 0; k < neighbors.size(); ++k)
-            //// for (int j : neighbors)
-            //{
-            //    int j = neighbors[k];
-            //
-            //    Eigen::Vector3d rji = rjis.row(k);
-            //    const double abs_rji2 = abs_rji2s[k];
-            //
-            //    // if (abs_rji2 > sigma[k] * sigma[k])
-            //    // continue;
-            //
-            //    const double abs_rji = abs_rjis[k];
-            //
-            //
-            //    const double inv_sigma2 = inv_sigma2s[k];
-            //    const double p_ij = p_ijs[k];
-            //    dxi += rho * p_ij / ri * rji / abs_rji;
-            //}
+            dx.row(i) = rho * dxi;
         }
 #pragma omp critical
         dr_in = std::min(dr_in, min_dr);

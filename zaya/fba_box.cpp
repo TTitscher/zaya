@@ -1,9 +1,10 @@
-#include <cmath>
 #include <iostream>
 #include <vector>
 #include <chrono>
 
 #include "src/helper.h"
+
+#define NDEBUG
 
 double DrOut(Eigen::VectorXd r, Eigen::VectorXd box, double eta = 1.)
 {
@@ -23,6 +24,10 @@ double Volume(const Eigen::VectorXd& r, double dr)
 
 void FBA(helper::RowMatrixXd x, const Eigen::VectorXd& r, Eigen::Vector3d box, double rho, double tau)
 {
+    Eigen::setNbThreads(0);
+    Eigen::initParallel();
+
+
     const double dr0 = DrOut(r, box, 1.);
     double dr = dr0;
 
@@ -32,9 +37,14 @@ void FBA(helper::RowMatrixXd x, const Eigen::VectorXd& r, Eigen::Vector3d box, d
     helper::RowMatrixXd dx = helper::RowMatrixXd::Zero(r.rows(), 3);
     helper::RowMatrixXd x_periodic(r.rows(), 3);
 
+    helper::SubBoxes boxes(box, r.maxCoeff() + dr);
+    for (int i = 0; i < r.rows(); ++i)
+        boxes.Add(i, x.row(i), r[i] + dr);
+
     for (int iteration = 0; iteration < 10000; ++iteration)
     {
-        double dr_in = helper::DxSphere(x, r, box, dr, rho, dx);
+
+        double dr_in = helper::DxSphere(x, r, box, dr, rho, dx, boxes);
 
         const double V_real = Volume(r, dr_in) / box.prod();
         const double V_virt = Volume(r, dr) / box.prod();
@@ -49,13 +59,7 @@ void FBA(helper::RowMatrixXd x, const Eigen::VectorXd& r, Eigen::Vector3d box, d
         for (int i : {0, 1, 2})
             x_periodic.col(i) = box[i] * Eigen::floor(x.col(i).array() / box[i]);
         x -= x_periodic;
-        // std::cout << x << std::endl;
-        // const double num = 1.;
-        // auto mod_matrix = (x.array() - (num * (x.array() / num))).matrix();
-        // std::cout << x << std::endl;
-        // x = mod_matrix;
-        // auto y = x.unaryExpr(std::fmod);
-        // x = y;
+
         dr -= pow(0.5, nu) * dr0 / (2. * tau);
     }
 }
