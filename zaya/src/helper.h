@@ -34,17 +34,28 @@ public:
         return i * _n.y() * _n.z() + j * _n.z() + k;
     }
 
-    std::vector<int> Ids(Eigen::Vector3d x, double r) const
+    inline std::tuple<int, int, int> Idk(Eigen::Vector3d x) const
     {
-        const int xs = floor((x.x() - r) * _n.x() / _l.x());
-        const int ys = floor((x.y() - r) * _n.y() / _l.y());
-        const int zs = floor((x.z() - r) * _n.z() / _l.z());
+        return {floor(x.x() * _n.x() / _l.x()), floor(x.y() * _n.y() / _l.y()), floor(x.z() * _n.z() / _l.z())};
+    }
 
-        const int xe = floor((x.x() + r) * _n.x() / _l.x());
-        const int ye = floor((x.y() + r) * _n.y() / _l.y());
-        const int ze = floor((x.z() + r) * _n.z() / _l.z());
+    void Add(int id, Eigen::Vector3d x)
+    {
+        auto [idx, idy, idz] = Idk(x);
+        const int box_id = Id(idx, idy, idz);
+        _boxes.at(box_id).push_back(id);
+        // int s = _boxes.at(box_id).size();
+        // if (s > 1)
+        // std::coumax< s << std::endl;
+    }
 
-        std::vector<int> ids;
+    void Neighbors(Eigen::Vector3d x, double r, int to_del, std::vector<int>& n)
+    {
+        n.clear();
+
+        auto [xs, ys, zs] = Idk(x.array() - r);
+        auto [xe, ye, ze] = Idk(x.array() + r);
+
         for (int x = xs; x <= xe; ++x)
         {
             for (int y = ys; y <= ye; ++y)
@@ -55,36 +66,14 @@ public:
                     const int xmod = (x + _n.x()) % _n.x();
                     const int ymod = (y + _n.y()) % _n.y();
                     const int zmod = (z + _n.z()) % _n.z();
-                    // std::cout << xmod << " " << ymod << " " << zmod << std::endl;
-                    ids.push_back(Id(xmod, ymod, zmod));
+
+                    const int box_id = Id(xmod, ymod, zmod);
+                    for (const auto& box : _boxes.at(box_id))
+                        if (box != to_del)
+                            n.push_back(box);
                 }
             }
         }
-
-
-        return ids;
-    }
-    void Add(int id, Eigen::Vector3d x, double r)
-    {
-        for (int box_id : Ids(x, r))
-            _boxes.at(box_id).push_back(id);
-    }
-
-    std::vector<int> Neighbors(Eigen::Vector3d x, double r, int to_del) const
-    {
-        std::vector<int> n;
-        // n.reserve(20);
-
-        for (int id : Ids(x, r))
-        {
-            const auto& box = _boxes.at(id);
-            int size = n.size();
-            n.insert(n.end(), box.begin(), box.end());
-            std::inplace_merge(n.begin(), n.begin() + size, n.end());
-        }
-        n.erase(std::unique(n.begin(), n.end()), n.end());
-        n.erase(std::remove(n.begin(), n.end(), to_del), n.end());
-        return n;
     }
 
     Eigen::Vector3i _n;
@@ -112,60 +101,87 @@ inline Eigen::Vector3d PeriodicDistance(const Eigen::Vector3d& xi, const Eigen::
     const Eigen::Vector3d correction = box.array() * Eigen::round(rji_unperiodic.array() / box.array());
     return rji_unperiodic - correction;
 }
-
-double DxSphere(const RowMatrixXd& x, const Eigen::VectorXd& r, const Eigen::Vector3d box, double dr, double rho,
-                Eigen::Ref<RowMatrixXd> dx, SubBoxes& boxes)
+class FBA
 {
-    double dr_in = 1000.;
+public:
+    FBA(Eigen::Ref<RowMatrixXd> x, const Eigen::VectorXd& r, Eigen::Vector3d box, double dr0)
+        : _x(x)
+        , _r(r)
+        , _box(box)
+        , _boxes(box, r.maxCoeff() + dr0)
+    {
+        for (int i = 0; i < _r.rows(); ++i)
+            _boxes.Add(i, x.row(i));
+    }
 
-    boxes.Init(r.maxCoeff() + dr);
-    for (auto& box : boxes._boxes)
-        box.clear();
+    double Step(Eigen::Ref<RowMatrixXd> dx, double dr, double rho)
+    {
+        double dr_in = 1000.;
+        const double rmax = _r[0];
 
-    for (int i = 0; i < r.rows(); ++i)
-        boxes.Add(i, x.row(i), r[i] + dr);
+        _boxes.Init(rmax + dr);
+        for (auto& box : _boxes._boxes)
+            box.clear();
+
+        for (int i = 0; i < _r.rows(); ++i)
+            _boxes.Add(i, _x.row(i));
 
 #pragma omp parallel
-    {
-        double min_dr = dr_in;
+        {
+            double min_dr = dr_in;
+            int my_n_neighbors = 0;
+            std::vector<int> neighbors;
+            neighbors.reserve(100);
 
 #pragma omp for
-        for (int i = 0; i < r.rows(); ++i)
-        {
-            const double ri = r[i];
-            Eigen::Vector3d dxi = Eigen::Vector3d::Zero();
-            const double r_out_i = ri + dr;
-
-            auto neighbors = boxes.Neighbors(x.row(i), ri + dr, i);
-            for (int j : neighbors)
+            for (int i = 0; i < _r.rows(); ++i)
             {
-                const double r_out_j = r[j] + dr;
-                const double sigma = r_out_i + r_out_j;
-                const double sigma2 = sigma * sigma;
-                Eigen::Vector3d rji = PeriodicDistance(x.row(i), x.row(j), box);
-                const double abs_rji2 = rji.squaredNorm();
+                const double ri = _r[i];
+                Eigen::Vector3d dxi = Eigen::Vector3d::Zero();
+                const double r_out_i = ri + dr;
+
+                _boxes.Neighbors(_x.row(i), ri + rmax + 2 * dr, i, neighbors);
+                my_n_neighbors += neighbors.size();
+
+                for (int j : neighbors)
+                {
+                    const double r_out_j = _r[j] + dr;
+                    const double sigma = r_out_i + r_out_j;
+                    const double sigma2 = sigma * sigma;
+                    Eigen::Vector3d rji = PeriodicDistance(_x.row(i), _x.row(j), _box);
+                    const double abs_rji2 = rji.squaredNorm();
 
 
-                if (abs_rji2 > sigma2)
-                    continue;
+                    if (abs_rji2 > sigma2)
+                        continue;
 
-                const double abs_rji = std::sqrt(abs_rji2);
+                    const double abs_rji = std::sqrt(abs_rji2);
 
-                const double allowed_distance = r[j] + ri;
+                    const double allowed_distance = _r[j] + ri;
 
-                min_dr = std::min(min_dr, (abs_rji - allowed_distance) / 2.);
+                    min_dr = std::min(min_dr, (abs_rji - allowed_distance) / 2.);
 
-                const double inv_sigma2 = 1 / sigma2;
-                const double p_ij = 4 * r_out_i * r_out_j * (1 - abs_rji2 * inv_sigma2) * inv_sigma2;
-                dxi += p_ij / ri * rji / abs_rji;
+                    const double inv_sigma2 = 1 / sigma2;
+                    const double p_ij = 4 * r_out_i * r_out_j * (1 - abs_rji2 * inv_sigma2) * inv_sigma2;
+                    dxi += p_ij / ri * rji / abs_rji;
+                }
+                dx.row(i) = rho * dxi;
             }
-            dx.row(i) = rho * dxi;
-        }
 #pragma omp critical
-        dr_in = std::min(dr_in, min_dr);
+            dr_in = std::min(dr_in, min_dr);
+            n_neighbors += my_n_neighbors;
+        }
+        return dr_in;
     }
-    return dr_in;
-}
+
+
+    Eigen::Ref<RowMatrixXd> _x;
+    const Eigen::VectorXd& _r;
+    Eigen::Vector3d _box;
+    SubBoxes _boxes;
+
+    unsigned long n_neighbors = 0;
+};
 
 RowMatrixXd RSA(Eigen::VectorXd r, Eigen::Vector3d box, int max_tries = 1e5)
 {
@@ -177,13 +193,15 @@ RowMatrixXd RSA(Eigen::VectorXd r, Eigen::Vector3d box, int max_tries = 1e5)
         throw 0;
     SubBoxes boxes(box, r[0]);
 
+    std::vector<int> neighbors;
+
     for (int i = 0; i < r.rows(); ++i)
     {
         const double ri = r[i];
         // update the subboxes, if they changed
         if (boxes.Init(ri))
             for (int j = 0; j < i; ++j)
-                boxes.Add(j, x.row(j), r[j]);
+                boxes.Add(j, x.row(j));
 
         int i_try = 0;
         while (true)
@@ -195,7 +213,9 @@ RowMatrixXd RSA(Eigen::VectorXd r, Eigen::Vector3d box, int max_tries = 1e5)
             xi.array() *= box.array();
 
             bool overlap = false;
-            for (int j : boxes.Neighbors(xi, ri, i))
+            boxes.Neighbors(xi, ri + r.maxCoeff(), i, neighbors);
+
+            for (int j : neighbors)
             {
                 const double abs_rji = PeriodicDistance(xi, x.row(j), box).norm();
 
@@ -208,7 +228,7 @@ RowMatrixXd RSA(Eigen::VectorXd r, Eigen::Vector3d box, int max_tries = 1e5)
             if (not overlap)
             {
                 x.row(i) = xi;
-                boxes.Add(i, xi, ri);
+                boxes.Add(i, xi);
                 break;
             }
 

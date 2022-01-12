@@ -37,20 +37,19 @@ void FBA(helper::RowMatrixXd x, const Eigen::VectorXd& r, Eigen::Vector3d box, d
     helper::RowMatrixXd dx = helper::RowMatrixXd::Zero(r.rows(), 3);
     helper::RowMatrixXd x_periodic(r.rows(), 3);
 
-    helper::SubBoxes boxes(box, r.maxCoeff() + dr);
-    for (int i = 0; i < r.rows(); ++i)
-        boxes.Add(i, x.row(i), r[i] + dr);
+    helper::FBA fba(x, r, box, dr0);
 
     for (int iteration = 0; iteration < 10000; ++iteration)
     {
 
-        double dr_in = helper::DxSphere(x, r, box, dr, rho, dx, boxes);
+        double dr_in = fba.Step(dx, dr, rho);
 
         const double V_real = Volume(r, dr_in) / box.prod();
         const double V_virt = Volume(r, dr) / box.prod();
 
         const double nu = ceil(-log10(V_virt - V_real));
-        std::cout << iteration << ": " << V_real << " | " << V_virt << " | " << nu << " | " << std::endl;
+        std::cout << iteration << ": " << V_real << " | " << V_virt << " | " << nu << " | "
+                  << double(fba.n_neighbors) / r.size() / iteration << std::endl;
 
         if (dr_in > dr)
             break;
