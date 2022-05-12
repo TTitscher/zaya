@@ -6,11 +6,13 @@ ti.init(kernel_profiler=True, arch=ti.cuda)
 RES_X = 1000
 RES_Y = RES_X // 2
 
-MAX_STEPS = 100
-MAX_DIST = 1000.0
-EPS = 0.01
+MAX_STEPS = 200
+MAX_DIST = 10000.0
+EPS = 0.001
 
 pixels = ti.Vector.field(3, dtype=ti.f32, shape=(RES_X, RES_Y))
+
+time = ti.Vector.field(1, dtype=float, shape=())
 
 cam_pos = ti.Vector.field(3, dtype=float, shape=())
 cam_rot = ti.Vector.field(2, dtype=float, shape=())
@@ -19,6 +21,9 @@ cam_pos[None].y = 1.0
 
 @ti.func
 def sd_sphere(p, center, radius):
+    # center[0] -= (p.x // 3)
+    # p2 = p
+    # p2.x = p.x % 10
     return (p - center).norm() - radius
 
 
@@ -29,13 +34,15 @@ def sd_sphere(p, center, radius):
 
 @ti.func
 def get_distance(p):
-    d_sphere1 = sd_sphere(p, (0.0, 1.0, 6.0), 1.0)
-    d_sphere2 = sd_sphere(p, (1.0, 2.0, 6.0), 1.0)
+    t = time[None].x
+    d_sphere1 = sd_sphere(p, [0.0 + 10*ti.sin(0.2*t), 2.0, 6.0], 2.0 + 0.5*ti.sin(p.y + 5*t))
+    # d_sphere1 = sd_sphere(p, [0.0, 2.0, 6.0], 2.0 + 0.5*ti.sin(p.y + 5*t))
+    d_sphere2 = sd_sphere(p, (3.0, 0.75+0.25*ti.sin(p.y+13*t), 3.0), 0.5)
 
     op = ti.min(d_sphere1, d_sphere2)
 
     # plane at (0,0,0) pointing in y direction
-    plane_distance = p.y
+    plane_distance = p.y #- ti.exp(-0.01*p.xz.norm())*(0.4*ti.sin(p.x-t) + 0.2*ti.cos(p.z))
     return ti.min(op, plane_distance)
 
 
@@ -52,7 +59,7 @@ def ray_march(ray_origin, ray_direction):
         distance = get_distance(p)
         d += distance
 
-        if d > MAX_DIST or distance < EPS:
+        if d > MAX_DIST or abs(distance) < EPS:
             break
 
     return d
@@ -99,7 +106,7 @@ def get_light(p, t, light_pos):
 
 
 @ti.kernel
-def paint(t: float):
+def paint():
     for i, j in pixels:  # Parallelized over all pixels
 
         x = (i - 0.5 * RES_X) / RES_Y  # / RES_Y is not a typo. Makes dx == dy
@@ -115,6 +122,8 @@ def paint(t: float):
         d = ray_march(ray_origin, ray_direction)
         p = ray_origin + ray_direction * d
 
+        t = time[None].x
+        
         light_pos = ti.Vector((0.0, 20.0, 6.0))
         light_pos.x += ti.sin(t) * 30
         light_pos.z += ti.cos(t) * 30
@@ -131,7 +140,6 @@ def paint(t: float):
 
 gui = ti.GUI("test stuff", res=(RES_X, RES_Y))
 
-t = 0
 dt = 0.02
 CAM_SPEED = 0.1
 CAM_ROT_SPEED = 0.1
@@ -163,7 +171,7 @@ while not gui.get_event(ti.GUI.ESCAPE):
     if gui.is_pressed(ti.GUI.SHIFT):
         cam_pos[None].y -= CAM_SPEED
 
-    paint(t)
+    paint()
     gui.set_image(pixels)
     gui.show()
-    t += dt
+    time[None] += dt
