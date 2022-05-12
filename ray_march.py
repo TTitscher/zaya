@@ -19,27 +19,31 @@ cam_rot = ti.Vector.field(2, dtype=float, shape=())
 cam_pos[None].y = 1.0
 
 
+N = 10
+spheres_np = np.random.random((N, 4)).astype(float)
+spheres  = ti.Vector.field(4, dtype=ti.f32, shape=N)
+# spheres.from_numpy(spheres_np)
+
+
 @ti.func
 def sd_sphere(p, center, radius):
-    # center[0] -= (p.x // 3)
-    # p2 = p
-    # p2.x = p.x % 10
     return (p - center).norm() - radius
-
-
-# @ti.func
-# def sd_box(p, center, radius):
-# return (p - center).norm() - radius
 
 
 @ti.func
 def get_distance(p):
+    op = MAX_DIST
+    # spheres[:].xyz
     t = time[None].x
-    d_sphere1 = sd_sphere(p, [0.0 + 10*ti.sin(0.2*t), 2.0, 6.0], 2.0 + 0.5*ti.sin(p.y + 5*t))
-    # d_sphere1 = sd_sphere(p, [0.0, 2.0, 6.0], 2.0 + 0.5*ti.sin(p.y + 5*t))
-    d_sphere2 = sd_sphere(p, (3.0, 0.75+0.25*ti.sin(p.y+13*t), 3.0), 0.5)
 
-    op = ti.min(d_sphere1, d_sphere2)
+    # for i in range(N):
+        # op = ti.min(op, sd_sphere(p, 5*spheres[i].xyz, spheres[i].w))
+
+    d_sphere1 = sd_sphere(p, [0.0 + 10*ti.sin(0.2*t), 2.0, 6.0], 2.0 + 0.5*ti.sin(p.y + 5*t))
+    # # d_sphere1 = sd_sphere(p, [0.0, 2.0, 6.0], 2.0 + 0.5*ti.sin(p.y + 5*t))
+    # d_sphere2 = sd_sphere(p, (3.0, 0.75+0.25*ti.sin(p.y+13*t), 3.0), 0.5)
+    #
+    op = ti.min(d_sphere1, op)
 
     # plane at (0,0,0) pointing in y direction
     plane_distance = p.y #- ti.exp(-0.01*p.xz.norm())*(0.4*ti.sin(p.x-t) + 0.2*ti.cos(p.z))
