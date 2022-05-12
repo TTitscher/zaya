@@ -1,4 +1,5 @@
 import taichi as ti
+import numpy as np
 
 ti.init(kernel_profiler=True, arch=ti.cuda)
 
@@ -11,19 +12,27 @@ EPS = 0.01
 
 pixels = ti.Vector.field(3, dtype=ti.f32, shape=(RES_X, RES_Y))
 
-camera_pos = ti.Vector.field(3, dtype=float, shape=())
-camera_rot = ti.Vector.field(2, dtype=float, shape=())
-camera_pos[None].y = 1.
+cam_pos = ti.Vector.field(3, dtype=float, shape=())
+cam_rot = ti.Vector.field(2, dtype=float, shape=())
+cam_pos[None].y = 1.0
+
+
+@ti.func
+def sd_sphere(p, center, radius):
+    return (p - center).norm() - radius
+
+
+# @ti.func
+# def sd_box(p, center, radius):
+# return (p - center).norm() - radius
 
 
 @ti.func
 def get_distance(p):
-    sphere= ti.Vector((0.0, 1.0, 6.0, 1.))
-    sphere2 = ti.Vector((1.0, 2.0, 6.0, 1.))
-    sphere_distance = (p - sphere.xyz).norm() - sphere.w
-    sphere_distance2 = (p - sphere2.xyz).norm() - sphere.w
+    d_sphere1 = sd_sphere(p, (0.0, 1.0, 6.0), 1.0)
+    d_sphere2 = sd_sphere(p, (1.0, 2.0, 6.0), 1.0)
 
-    op = ti.min(sphere_distance, sphere_distance2)
+    op = ti.min(d_sphere1, d_sphere2)
 
     # plane at (0,0,0) pointing in y direction
     plane_distance = p.y
@@ -96,13 +105,11 @@ def paint(t: float):
         x = (i - 0.5 * RES_X) / RES_Y  # / RES_Y is not a typo. Makes dx == dy
         y = (j - 0.5 * RES_Y) / RES_Y
 
-        ray_origin = camera_pos[None]
+        ray_origin = cam_pos[None]
         ray_direction = ti.Vector((x, y, 1.0)).normalized()
 
-        Rx = ti.Matrix.rotation2d(camera_rot[None].x)
-        Ry = ti.Matrix.rotation2d(camera_rot[None].y)
-        ray_direction.zy = Ry @ ray_direction.zy
-        ray_direction.zx = Rx @ ray_direction.zx
+        ray_direction.yz = ti.Matrix.rotation2d(-cam_rot[None].y) @ ray_direction.yz
+        ray_direction.xz = ti.Matrix.rotation2d(-cam_rot[None].x) @ ray_direction.xz
 
         # find the intersection point `p` in in distance `d` along the ray
         d = ray_march(ray_origin, ray_direction)
@@ -122,35 +129,39 @@ def paint(t: float):
         pixels[i, j] = diffuse_light, 0.0, diffuse_light2
 
 
-
 gui = ti.GUI("test stuff", res=(RES_X, RES_Y))
 
 t = 0
 dt = 0.02
 CAM_SPEED = 0.1
-CAM_ROT_SPEED= 0.1
+CAM_ROT_SPEED = 0.1
 
-while True:
-    if gui.get_event(ti.GUI.PRESS):
-        if gui.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]:
-            break
+mx0, my0 = 0.0, 0.0
+
+while not gui.get_event(ti.GUI.ESCAPE):
+
+    if gui.is_pressed(ti.GUI.LMB):
+        mx, my = gui.get_cursor_pos()
+        cam_rot[None].x += (mx - mx0) * 3.1415
+        cam_rot[None].y += (my - my0) * 6.2831
+        mx0, my0 = gui.get_cursor_pos()
+    else:
+        mx0, my0 = gui.get_cursor_pos()
+
+    front = ti.Matrix.rotation2d(cam_rot[None].x)
+
     if gui.is_pressed("w"):
-        camera_pos[None].z += CAM_SPEED
+        cam_pos[None].zx += CAM_SPEED * front[:, 0]
     if gui.is_pressed("s"):
-        camera_pos[None].z -= CAM_SPEED
+        cam_pos[None].zx -= CAM_SPEED * front[:, 0]
     if gui.is_pressed("a"):
-        camera_pos[None].x -= CAM_SPEED
+        cam_pos[None].zx -= CAM_SPEED * front[:, 1]
     if gui.is_pressed("d"):
-        camera_pos[None].x += CAM_SPEED
-   
-    if gui.is_pressed(ti.GUI.UP):
-        camera_rot[None].y += CAM_ROT_SPEED
-    if gui.is_pressed(ti.GUI.DOWN):
-        camera_rot[None].y -= CAM_ROT_SPEED
-    if gui.is_pressed(ti.GUI.LEFT):
-        camera_rot[None].x -= CAM_ROT_SPEED
-    if gui.is_pressed(ti.GUI.RIGHT):
-        camera_rot[None].x += CAM_ROT_SPEED
+        cam_pos[None].zx += CAM_SPEED * front[:, 1]
+    if gui.is_pressed(ti.GUI.SPACE):
+        cam_pos[None].y += CAM_SPEED
+    if gui.is_pressed(ti.GUI.SHIFT):
+        cam_pos[None].y -= CAM_SPEED
 
     paint(t)
     gui.set_image(pixels)
