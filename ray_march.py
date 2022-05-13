@@ -1,14 +1,14 @@
 import taichi as ti
 import numpy as np
 
-ti.init(kernel_profiler=True, arch=ti.cuda)
+ti.init(arch=ti.gpu)
 
 RES_X = 1000
 RES_Y = RES_X // 2
 
 MAX_STEPS = 200
-MAX_DIST = 10000.0
-EPS = 0.001
+MAX_DIST = 1000.0
+EPS = 0.01
 
 pixels = ti.Vector.field(3, dtype=ti.f32, shape=(RES_X, RES_Y))
 
@@ -16,12 +16,12 @@ time = ti.Vector.field(1, dtype=float, shape=())
 
 cam_pos = ti.Vector.field(3, dtype=float, shape=())
 cam_rot = ti.Vector.field(2, dtype=float, shape=())
-cam_pos[None].y = 1.0
+cam_pos[None].y = 3.0
 
 
-N = 10
-spheres_np = np.random.random((N, 4)).astype(float)
-spheres  = ti.Vector.field(4, dtype=ti.f32, shape=N)
+# N = 10
+# spheres_np = np.random.random((N, 4)).astype(float)
+# spheres = ti.Vector.field(4, dtype=ti.f32, shape=N)
 # spheres.from_numpy(spheres_np)
 
 
@@ -31,22 +31,37 @@ def sd_sphere(p, center, radius):
 
 
 @ti.func
+def sd_box(p, center):
+    p = ti.abs(p) - center
+    return ti.max(p, 0.).norm() + ti.min(ti.max(p.x, max(p.y, p.z)), 0)
+
+@ti.func
+def sd_gyroid(p, scale):
+    p *= scale
+    return ti.sin(p).dot(ti.cos(p.zxy)) / scale
+
+
+@ti.func
 def get_distance(p):
     op = MAX_DIST
     # spheres[:].xyz
     t = time[None].x
 
-    # for i in range(N):
-        # op = ti.min(op, sd_sphere(p, 5*spheres[i].xyz, spheres[i].w))
+    d1 = sd_gyroid(p, 5.)
+    d2 = sd_gyroid(p + [0, t, 0], 5.)
 
-    d_sphere1 = sd_sphere(p, [0.0 + 10*ti.sin(0.2*t), 2.0, 6.0], 2.0 + 0.5*ti.sin(p.y + 5*t))
-    # # d_sphere1 = sd_sphere(p, [0.0, 2.0, 6.0], 2.0 + 0.5*ti.sin(p.y + 5*t))
-    # d_sphere2 = sd_sphere(p, (3.0, 0.75+0.25*ti.sin(p.y+13*t), 3.0), 0.5)
-    #
-    op = ti.min(d_sphere1, op)
+    # scale = 4.;
+    # d = sd_box((p/scale - [0, 1, 2]), [1,1,1] ) * scale
+    d = sd_sphere(p % 10, [5.0, 5.0, 5.0], 4.0 + 0.5 * ti.sin(p.y + 5 * t))
+
+    d = ti.max(d, d1, d2)
+    
+    op = ti.min(d, op)
 
     # plane at (0,0,0) pointing in y direction
-    plane_distance = p.y #- ti.exp(-0.01*p.xz.norm())*(0.4*ti.sin(p.x-t) + 0.2*ti.cos(p.z))
+    plane_distance = (
+        p.y
+    )  # - ti.exp(-0.01*p.xz.norm())*(0.4*ti.sin(p.x-t) + 0.2*ti.cos(p.z))
     return ti.min(op, plane_distance)
 
 
@@ -58,15 +73,17 @@ def ray_march(ray_origin, ray_direction):
     via ray marching. See wiki or so.
     """
     d = 0.0
+    d_min = MAX_DIST
     for i in range(MAX_STEPS):
         p = ray_origin + d * ray_direction
         distance = get_distance(p)
+        d_min = ti.min(d_min, distance)
         d += distance
 
         if d > MAX_DIST or abs(distance) < EPS:
             break
 
-    return d
+    return d, d_min
 
 
 @ti.func
@@ -103,7 +120,7 @@ def get_light(p, t, light_pos):
     d = ray_march(p + surface_normal * 2.0 * EPS, light_vector)
     d_ref = (p - light_pos).norm()
 
-    if d < d_ref:
+    if d[0] < d_ref:
         diffuse_light *= 0.5
 
     return ti.max(diffuse_light, 0.0)
@@ -123,26 +140,32 @@ def paint():
         ray_direction.xz = ti.Matrix.rotation2d(-cam_rot[None].x) @ ray_direction.xz
 
         # find the intersection point `p` in in distance `d` along the ray
-        d = ray_march(ray_origin, ray_direction)
+        d, d_min = ray_march(ray_origin, ray_direction)
         p = ray_origin + ray_direction * d
 
         t = time[None].x
-        
-        light_pos = ti.Vector((0.0, 20.0, 6.0))
-        light_pos.x += ti.sin(t) * 30
-        light_pos.z += ti.cos(t) * 30
 
-        light_pos2 = ti.Vector((0.0, 20.0, 6.0))
-        light_pos2.x -= ti.sin(-t) * 30
-        light_pos2.z -= ti.cos(t) * 30
+        light_pos = ti.Vector((0.0, 10.0, 6.0))
+        light_pos.x += ti.sin(0.2*t) * 30
+        light_pos.z += ti.cos(0.2*t) * 30
+
+        light_pos2 = ti.Vector((0.0, 10.0, 6.0))
+        light_pos2.x -= ti.sin(-0.4*t) * 30
+        light_pos2.z -= ti.cos(0.4*t) * 30
 
         diffuse_light = get_light(p, t, light_pos)
         diffuse_light2 = get_light(p, t, light_pos2)
 
-        pixels[i, j] = diffuse_light, 0.0, diffuse_light2
+        sunlight = ti.Vector((0.9922, 0.9842, 0.8275))
+        blue = ti.Vector((0., 0.7, 1.0))
+        
+        pixels[i, j] = sunlight * diffuse_light
+        pixels[i, j] += blue * diffuse_light2
+        # pixels[i, j] += yellowish * diffuse_light2
+        # pixels[i, j] = diffuse_light, 0.0, diffuse_light2
 
 
-gui = ti.GUI("test stuff", res=(RES_X, RES_Y))
+gui = ti.GUI("Move with WASD + mouse. Space/Shift = Up/Down ", res=(RES_X, RES_Y))
 
 dt = 0.02
 CAM_SPEED = 0.1
