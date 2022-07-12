@@ -53,12 +53,10 @@ def fix_defaults(letter_dict):
     letter_dict.setdefault("closing", "Mit freundlichen Grüßen")
     letter_dict.setdefault("opening", "Sehr geehrte Damen und Herren,")
     letter_dict.setdefault("signature", letter_dict["fromname"])
-    letter_dict.setdefault("pdf", True)
 
     for key, value in letter_dict.items():
-        if isinstance(value, str):
-            num_newlines = value.count("\n")
-            letter_dict[key] = value.replace("\n", "\\\\ \n", num_newlines - 1)
+        num_newlines = value.count("\n")
+        letter_dict[key] = value.replace("\n", "\\\\ \n", num_newlines - 1)
 
 
 def compile_pdf(tex):
@@ -98,11 +96,11 @@ def main():
     - opening:      defaults to "Sehr geehrte Damen und Herren,"
     - closing:      defaults to "Mit freundlichen Grüßen"
     - signature:    defaults to `fromname`
-    - pdf:          compile the pdf? Default: True
     """
 
     parser = argparse.ArgumentParser(description=desc, formatter_class=MyFormatter)
     parser.add_argument("input", help="Input YAML file.", type=Path)
+    parser.add_argument("--pdf", help="Compile a pdf?", action="store_true")
 
     args = parser.parse_args()
 
@@ -117,7 +115,7 @@ def main():
         f.write(template.substitute(letter_dict))
         print(f"Created {tex}")
 
-    if letter_dict["pdf"]:
+    if args.pdf:
         compile_pdf(tex)
 
 
