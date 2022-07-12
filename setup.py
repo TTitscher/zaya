@@ -18,9 +18,10 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    install_requires=["tabulate"],
+    install_requires=["tabulate", "pyyaml"],
     extras_require={  # Optional
         "dev": ["black"],
         "test": ["pytest", "pytest-cov", "flake8"],
     },
+    entry_points={"console_scripts": ["texify=zaya.texify:main"]}
 )
