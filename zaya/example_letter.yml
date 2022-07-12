@@ -1,0 +1,22 @@
+fromname: 
+    Max Mustermann
+
+fromadress: |
+    Musterstrasse 1
+    12345 Musterstadt
+
+to: |
+    Erika Mustermann
+    Moststraße 1
+    12345 Moststadt
+
+subject:
+    Betreff
+
+date:
+    1. Januar 2022
+
+body: |
+    Bitte lassen Sie mich in Ruhe.
+
+    Vielen Dank im Voraus!
