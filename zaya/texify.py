@@ -1,12 +1,13 @@
 import shutil
 import subprocess
 import sys
+import argparse
 from pathlib import Path
 from string import Template
 from tempfile import TemporaryDirectory
 
+
 import yaml
-from loguru import logger
 
 template = Template(
     r"""
@@ -47,39 +48,77 @@ $body
 )
 
 
-def main():
-    try:
-        inp = Path(sys.argv[1])
-    except IndexError as e:
-        raise RuntimeError("Specify a YAML file.") from e
-
-    with open(inp, "r") as f:
-        letter_dict = yaml.load(f, Loader=yaml.Loader)
-
+def fix_defaults(letter_dict):
     letter_dict.setdefault("date", "\\today")
     letter_dict.setdefault("closing", "Mit freundlichen Grüßen")
     letter_dict.setdefault("opening", "Sehr geehrte Damen und Herren,")
     letter_dict.setdefault("signature", letter_dict["fromname"])
+    letter_dict.setdefault("pdf", True)
 
     for key, value in letter_dict.items():
-        num_newlines = value.count("\n")
-        letter_dict[key] = value.replace("\n", "\\\\ \n", num_newlines - 1)
+        if isinstance(value, str):
+            num_newlines = value.count("\n")
+            letter_dict[key] = value.replace("\n", "\\\\ \n", num_newlines - 1)
 
+
+def compile_pdf(tex):
     with TemporaryDirectory() as d:
-        outdir = Path(d).absolute()
-        tex = outdir / inp.with_suffix(".tex")
-        with open(tex, "w") as f:
-            logger.info(f"Created {tex}")
-            f.write(template.substitute(letter_dict))
+        tex_dir = Path(d).absolute()
 
-        latex_cmd = ["latexmk", "-pdf", f"-outdir={outdir}", str(tex)]
+        latex_cmd = ["latexmk", "-pdf", f"-outdir={tex_dir}", str(tex)]
         p = subprocess.run(latex_cmd, capture_output=True)
-        logger.debug(p.stderr.decode("utf-8"))
 
-        src = tex.with_suffix(".pdf")
-        dst = Path.cwd() / tex.with_suffix(".pdf").name
+        src = tex_dir / tex.with_suffix(".pdf").name
+        dst = tex.with_suffix(".pdf")
         shutil.copy2(src, dst)
-        logger.info(f"Created {dst}")
+        print(f"Created {dst}")
+
+
+def main():
+    class MyFormatter(argparse.ArgumentDefaultsHelpFormatter):         
+        def _fill_text(self, text, width, indent):             
+            return "".join(indent + line for line in text.splitlines(keepends=True))     
+
+    desc = r"""
+    TEXIFY
+
+    Converts an `input.yml` to a LaTeX DIN letter.
+
+    Required YML keys
+    =================
+    - fromname:     name of sender
+    - fromadress:   adress of sender
+    - to:           name and adress of recipient
+    - subject
+    - body
+    
+    Optional YML keys
+    =================
+    - date:         defaults to \today
+    - opening:      defaults to "Sehr geehrte Damen und Herren,"
+    - closing:      defaults to "Mit freundlichen Grüßen"
+    - signature:    defaults to `fromname`
+    - pdf:          compile the pdf? Default: True
+    """
+
+    parser = argparse.ArgumentParser(description=desc, formatter_class=MyFormatter)
+    parser.add_argument("input", help="Input YAML file.", type=Path)
+
+    args = parser.parse_args()
+
+    with open(args.input, "r") as f:
+        letter_dict = yaml.load(f, Loader=yaml.Loader)
+
+    fix_defaults(letter_dict)
+
+    # write tex file in CWD in any case
+    tex = Path.cwd() / args.input.with_suffix(".tex")
+    with open(tex, "w") as f:
+        f.write(template.substitute(letter_dict))
+        print(f"Created {tex}")
+
+    if letter_dict["pdf"]:
+        compile_pdf(tex)
 
 
 if __name__ == "__main__":

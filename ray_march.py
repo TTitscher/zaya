@@ -6,9 +6,11 @@ ti.init(arch=ti.gpu)
 RES_X = 1000
 RES_Y = RES_X // 2
 
-MAX_STEPS = 200
+MAX_STEPS = 100
 MAX_DIST = 1000.0
 EPS = 0.01
+
+EPS2 = ti.Vector((EPS, 0))
 
 pixels = ti.Vector.field(3, dtype=ti.f32, shape=(RES_X, RES_Y))
 
@@ -48,13 +50,20 @@ def get_distance(p):
     t = time[None].x
 
     d1 = sd_gyroid(p, 5.)
+    # d1 = 0.
     d2 = sd_gyroid(p + [0, t, 0], 5.)
 
-    # scale = 4.;
+    scale = 4.;
     # d = sd_box((p/scale - [0, 1, 2]), [1,1,1] ) * scale
-    d = sd_sphere(p % 10, [5.0, 5.0, 5.0], 4.0 + 0.5 * ti.sin(p.y + 5 * t))
+    d = sd_sphere(p % 1 , [5.0, 5.0, 5.0], 4.0 + 0.5 * ti.sin(p.y + 5 * t))
+    # dout = (p.xz - [0, 0]).norm() - 5
+    # d = p.y
+    # if dout > 0 :
+        # d = ti.sqrt(p.y**2 + dout**2)
 
+    # return d
     d = ti.max(d, d1, d2)
+
     
     op = ti.min(d, op)
 
@@ -90,9 +99,9 @@ def ray_march(ray_origin, ray_direction):
 def get_normal(p):
     d = get_distance(p)
 
-    dx = get_distance(p - ti.Vector((EPS, 0.0, 0.0)))
-    dy = get_distance(p - ti.Vector((0.0, EPS, 0.0)))
-    dz = get_distance(p - ti.Vector((0.0, 0.0, EPS)))
+    dx = get_distance(p - EPS2.xyy)
+    dy = get_distance(p - EPS2.yxy)
+    dz = get_distance(p - EPS2.yyx)
 
     return (d - ti.Vector((dx, dy, dz))).normalized()
 
@@ -161,6 +170,11 @@ def paint():
         
         pixels[i, j] = sunlight * diffuse_light
         pixels[i, j] += blue * diffuse_light2
+
+        # if d_min > EPS and d_min < 10*EPS:
+            # pixels[i, j] = blue
+
+
         # pixels[i, j] += yellowish * diffuse_light2
         # pixels[i, j] = diffuse_light, 0.0, diffuse_light2
 
