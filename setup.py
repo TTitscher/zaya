@@ -23,5 +23,5 @@ setuptools.setup(
         "dev": ["black"],
         "test": ["pytest", "pytest-cov", "flake8"],
     },
-    entry_points={"console_scripts": ["texify=zaya.texify:main"]}
+    entry_points={"console_scripts": ["texify=zaya.texify:main", "work=zaya.work:cli"]}
 )
